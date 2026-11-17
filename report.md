@@ -4,7 +4,7 @@
      that produced it. Sections marked TO WRITE are yours by course policy. Delete these HTML
      comments and every TO WRITE block before submitting. -->
 
-**Partners:** Asal Roudbari, aroudbari3 — and [partner name, username]
+**Partners:** Asal Roudbari, aroudbari3 — Jae hyung Ju
 **Models:** LLM [name, reasoning effort] · ASR `Systran/faster-whisper-small.en` (faster-whisper 1.2.1, CTranslate2 4.9.0) · TTS [Piper en_US lessac medium]
 **Run behind the figures:** PACE-ICE job **7124980** · 1× NVIDIA H100 80GB, 8 of the node's 64 CPUs · 36 turns · trace `run_output_pace/asr_7124980/trace.jsonl`
 
