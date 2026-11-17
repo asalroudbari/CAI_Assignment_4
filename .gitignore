@@ -1,0 +1,24 @@
+# --- Regenerable or source-only, deliberately not shipped -------------------------------------
+
+# The .aifc originals the recordings were converted from (19 MB). recordings/*.wav are what the
+# shim reads and what WER is scored against; these are kept locally only.
+recordings_raw/
+
+# Rebuilt any time by: PYTHONPATH=. python3 make_sidecars.py propose
+review_audio/
+
+# Local laptop runs. The graded traces live in run_output_pace/ and are committed.
+run_output/
+
+# --- Python -----------------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# --- Apptainer / PACE scratch -----------------------------------------------------------------
+*.sif
+vllm-*.log
+
+# --- macOS ------------------------------------------------------------------------------------
+.DS_Store

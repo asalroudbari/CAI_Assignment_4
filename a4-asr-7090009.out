@@ -1,0 +1,350 @@
+---------------------------------------
+Begin Slurm Prolog: Nov-15-2026 14:01:43
+Job ID:    7090009
+User ID:   aroudbari3
+Account:   coc
+Job name:  a4-asr
+Partition: coe-gpu
+QOS:       coe-ice
+---------------------------------------
+node: atl1-1-03-011-23-0.pace.gatech.edu
+slurm cpus-per-task: 8
+runtime: venv
+GPU 0: NVIDIA H100 80GB HBM3 (UUID: GPU-72c77652-7432-d838-65ff-5d24bb314533)
+
+================ 1. what this job may actually use ================
+os.cpu_count()                     64  <- the whole NODE
+len(os.sched_getaffinity(0))       8  <- what Slurm gave THIS job
+OMP_NUM_THREADS before the agent   (unset)
+MKL_NUM_THREADS before the agent   (unset)
+ctranslate2                        4.9.0
+faster_whisper                     1.2.1
+ctranslate2.get_cuda_device_count  1
+
+================ 2. is the shared cache serving the model offline? ================
+models--Systran--faster-whisper-small.en
+
+================ 3. GPU decode, float16 (the graded path) ================
+==============================================================================
+benchmark         20 decodes of asal_d01_t01.wav
+audio             3.76 s to end of speech (the file is 4.76 s)
+cpu count         8 from len(os.sched_getaffinity(0))
+OMP_NUM_THREADS   (unset) -> 8
+MKL_NUM_THREADS   (unset) -> 8
+asr               Systran/faster-whisper-small.en device=cuda compute_type=float16 cpu_threads=8 num_workers=1 beam_size=1 vad_filter=False condition_on_previous_text=False
+==============================================================================
+warmup              15327.2 ms  (model load + one dummy decode)
+
+  run 1        61.1 ms
+  run 2        29.6 ms
+  run 3        29.2 ms
+  run 4        29.2 ms
+  run 5        29.1 ms
+  run 6        29.1 ms
+  run 7        29.2 ms
+  run 8        29.1 ms
+  run 9        29.2 ms
+  run 10       29.1 ms
+  run 11       29.1 ms
+  run 12       29.0 ms
+  run 13       29.2 ms
+  run 14       29.1 ms
+  run 15       29.0 ms
+  run 16       29.2 ms
+  run 17       29.0 ms
+  run 18       29.1 ms
+  run 19       29.0 ms
+  run 20       29.0 ms
+
+p50                    29.1 ms
+p95                    31.1 ms
+min                    29.0 ms
+max                    61.1 ms
+mean                   30.7 ms
+real time factor     129.04x  (audio seconds per decode second)
+first vs p50          209.5 %   (61.1 ms against a median of 29.1 ms)
+
+transcript        Set a timer for five minutes for the pasta.
+
+================ 4. GPU decode, beam 5 (the accuracy/latency trade) ================
+==============================================================================
+benchmark         20 decodes of asal_d01_t01.wav
+audio             3.76 s to end of speech (the file is 4.76 s)
+cpu count         8 from len(os.sched_getaffinity(0))
+OMP_NUM_THREADS   (unset) -> 8
+MKL_NUM_THREADS   (unset) -> 8
+asr               Systran/faster-whisper-small.en device=cuda compute_type=float16 cpu_threads=8 num_workers=1 beam_size=5 vad_filter=False condition_on_previous_text=False
+==============================================================================
+warmup               1937.6 ms  (model load + one dummy decode)
+
+  run 1        49.4 ms
+  run 2        34.9 ms
+  run 3        33.2 ms
+  run 4        33.1 ms
+  run 5        33.0 ms
+  run 6        32.9 ms
+  run 7        32.9 ms
+  run 8        32.9 ms
+  run 9        32.8 ms
+  run 10       32.8 ms
+  run 11       32.9 ms
+  run 12       32.9 ms
+  run 13       32.9 ms
+  run 14       32.9 ms
+  run 15       32.9 ms
+  run 16       32.8 ms
+  run 17       32.8 ms
+  run 18       32.9 ms
+  run 19       32.9 ms
+  run 20       33.0 ms
+
+p50                    32.9 ms
+p95                    35.6 ms
+min                    32.8 ms
+max                    49.4 ms
+mean                   33.8 ms
+real time factor     114.21x  (audio seconds per decode second)
+first vs p50          150.1 %   (49.4 ms against a median of 32.9 ms)
+
+transcript        Set a timer for five minutes for the pasta.
+
+================ 5. CPU fallback, thread sweep ================
+---- --cpu-count 1 ----
+cpu count         1 from len(os.sched_getaffinity(0))
+OMP_NUM_THREADS   (unset) -> 1
+MKL_NUM_THREADS   (unset) -> 1
+asr               Systran/faster-whisper-small.en device=cpu compute_type=int8 cpu_threads=1 num_workers=1 beam_size=1 vad_filter=False condition_on_previous_text=False
+p50                  2387.8 ms
+p95                  2391.3 ms
+real time factor       1.57x  (audio seconds per decode second)
+---- --cpu-count 2 ----
+cpu count         2 from len(os.sched_getaffinity(0))
+OMP_NUM_THREADS   (unset) -> 2
+MKL_NUM_THREADS   (unset) -> 2
+asr               Systran/faster-whisper-small.en device=cpu compute_type=int8 cpu_threads=2 num_workers=1 beam_size=1 vad_filter=False condition_on_previous_text=False
+p50                  1381.6 ms
+p95                  1388.3 ms
+real time factor       2.72x  (audio seconds per decode second)
+---- --cpu-count 4 ----
+cpu count         4 from len(os.sched_getaffinity(0))
+OMP_NUM_THREADS   (unset) -> 4
+MKL_NUM_THREADS   (unset) -> 4
+asr               Systran/faster-whisper-small.en device=cpu compute_type=int8 cpu_threads=4 num_workers=1 beam_size=1 vad_filter=False condition_on_previous_text=False
+p50                   889.4 ms
+p95                   892.0 ms
+real time factor       4.23x  (audio seconds per decode second)
+---- --cpu-count 8 ----
+cpu count         8 from len(os.sched_getaffinity(0))
+OMP_NUM_THREADS   (unset) -> 8
+MKL_NUM_THREADS   (unset) -> 8
+asr               Systran/faster-whisper-small.en device=cpu compute_type=int8 cpu_threads=8 num_workers=1 beam_size=1 vad_filter=False condition_on_previous_text=False
+p50                   587.8 ms
+p95                   657.8 ms
+real time factor       6.40x  (audio seconds per decode second)
+
+================ 6. a whole session: real ASR, stand-in brain and TTS ================
+==============================================================================
+recordings        36 from /home/hice1/aroudbari3/CAI_Assignment_4/recordings
+output            /home/hice1/aroudbari3/CAI_Assignment_4/run_output/asr_7090009
+tts sample rate   22050 Hz
+cpu count         8 from len(os.sched_getaffinity(0))
+OMP_NUM_THREADS   (unset) -> 8
+MKL_NUM_THREADS   (unset) -> 8
+asr               FasterWhisperAsr (real)
+brain             FakeBrain (fake)
+tts               FakeTts (fake)
+asr settings      Systran/faster-whisper-small.en device=cuda compute_type=float16 cpu_threads=8 num_workers=1 beam_size=1 vad_filter=False condition_on_previous_text=False
+
+*** FAKE STAGES ACTIVE — THESE NUMBERS ARE NOT A REAL MEASUREMENT ***
+==============================================================================
+warming up ...
+  asr    warmed up in   1399.8 ms
+  brain  warmed up in      0.0 ms
+  tts    warmed up in      0.0 ms
+warm up finished in 1399.8 ms
+
+--- dialogue 01 ---
+turn_0001  asr     45.9 ms | llm_start    150.2 ms | speech_start      0.0 ms | ttfa    196.1 ms
+             transcript: Set a timer for five minutes for the pasta.
+             reply:      This is a fake reply from FakeBrain. No model p…
+turn_0002  asr     39.9 ms | llm_start    150.2 ms | speech_start      0.0 ms | ttfa    190.1 ms
+             transcript: Also started 20 minute phone for the laundry.
+             reply:      This is a fake reply from FakeBrain. No model p…
+turn_0003  asr     39.6 ms | llm_start    150.2 ms | speech_start      0.0 ms | ttfa    189.8 ms
+             transcript: How much is left on the pesto?
+             reply:      This is a fake reply from FakeBrain. No model p…
+--- dialogue 02 ---
+turn_0004  asr     35.2 ms | llm_start    150.2 ms | speech_start      0.0 ms | ttfa    185.4 ms
+             transcript: Remind me to study for the CIA course 230 today.
+             reply:      This is a fake reply from FakeBrain. No model p…
+turn_0005  asr     39.9 ms | llm_start    150.2 ms | speech_start      0.0 ms | ttfa    190.1 ms
+             transcript: I actually can't sell that I have a model cours…
+             reply:      This is a fake reply from FakeBrain. No model p…
+--- dialogue 03 ---
+turn_0006  asr     34.7 ms | llm_start    150.2 ms | speech_start      0.0 ms | ttfa    184.9 ms
+             transcript: Put the timer for me.
+             reply:      This is a fake reply from FakeBrain. No model p…
+turn_0007  asr     30.5 ms | llm_start    150.2 ms | speech_start      0.0 ms | ttfa    180.7 ms
+             transcript: Half an hour.
+             reply:      This is a fake reply from FakeBrain. No model p…
+turn_0008  asr     32.3 ms | llm_start    150.2 ms | speech_start      0.0 ms | ttfa    182.5 ms
+             transcript: Add 10 more minutes to that.
+             reply:      This is a fake reply from FakeBrain. No model p…
+--- dialogue 04 ---
+turn_0009  asr     41.9 ms | llm_start    150.2 ms | speech_start      0.0 ms | ttfa    192.1 ms
+             transcript: Remind me on 18th of November that I have a qua…
+             reply:      This is a fake reply from FakeBrain. No model p…
+turn_0010  asr     44.9 ms | llm_start    150.2 ms | speech_start      0.0 ms | ttfa    195.1 ms
+             transcript: And another reminder that I have a deadline for…
+             reply:      This is a fake reply from FakeBrain. No model p…
+turn_0011  asr     53.3 ms | llm_start    150.2 ms | speech_start      0.0 ms | ttfa    203.5 ms
+             transcript: Actually, the deadline for the homework is on t…
+             reply:      This is a fake reply from FakeBrain. No model p…
+turn_0012  asr     36.9 ms | llm_start    150.2 ms | speech_start      0.0 ms | ttfa    187.1 ms
+             transcript: Read my reminders back to me.
+             reply:      This is a fake reply from FakeBrain. No model p…
+--- dialogue 05 ---
+turn_0013  asr     45.9 ms | llm_start    150.2 ms | speech_start      0.0 ms | ttfa    196.1 ms
+             transcript: Where is the quiet lounge and how can I access …
+             reply:      This is a fake reply from FakeBrain. No model p…
+turn_0014  asr     32.7 ms | llm_start    150.2 ms | speech_start      0.0 ms | ttfa    182.8 ms
+             transcript: Can I have my group meeting in the quiet lounge?
+             reply:      This is a fake reply from FakeBrain. No model p…
+--- dialogue 06 ---
+turn_0015  asr     51.8 ms | llm_start    150.2 ms | speech_start      0.0 ms | ttfa    202.0 ms
+             transcript: How much is a day locker and do I need to bring…
+             reply:      This is a fake reply from FakeBrain. No model p…
+turn_0016  asr     32.1 ms | llm_start    150.2 ms | speech_start      0.0 ms | ttfa    182.3 ms
+             transcript: How much does it cost to laminate one page?
+             reply:      This is a fake reply from FakeBrain. No model p…
+turn_0017  asr     46.2 ms | llm_start    150.2 ms | speech_start      0.0 ms | ttfa    196.3 ms
+             transcript: How far ahead can I book a room and for how lon…
+             reply:      This is a fake reply from FakeBrain. No model p…
+--- dialogue 07 ---
+turn_0018  asr     38.6 ms | llm_start    150.2 ms | speech_start      0.0 ms | ttfa    188.7 ms
+             transcript: What are the working hours on Sunday?
+             reply:      This is a fake reply from FakeBrain. No model p…
+turn_0019  asr     35.3 ms | llm_start    150.2 ms | speech_start      0.0 ms | ttfa    185.4 ms
+             transcript: Can I have my coffee at the cafe on Sunday?
+             reply:      This is a fake reply from FakeBrain. No model p…
+--- dialogue 08 ---
+turn_0020  asr     72.1 ms | llm_start    150.2 ms | speech_start      0.0 ms | ttfa    222.3 ms
+             transcript: It's 10 p.m. on a Sunday and I'm at the front d…
+             reply:      This is a fake reply from FakeBrain. No model p…
+turn_0021  asr     45.6 ms | llm_start    150.2 ms | speech_start      0.0 ms | ttfa    195.7 ms
+             transcript: I wanted to ask about parking information. Wher…
+             reply:      This is a fake reply from FakeBrain. No model p…
+--- dialogue 09 ---
+turn_0022  asr     65.4 ms | llm_start    150.2 ms | speech_start      0.0 ms | ttfa    215.6 ms
+             transcript: I want to go to the laptop center and loan a la…
+             reply:      This is a fake reply from FakeBrain. No model p…
+turn_0023  asr     53.1 ms | llm_start    150.2 ms | speech_start      0.0 ms | ttfa    203.3 ms
+             transcript: Can I leave my child here at the cafe? She's 10…
+             reply:      This is a fake reply from FakeBrain. No model p…
+--- dialogue 10 ---
+turn_0024  asr     58.9 ms | llm_start    150.2 ms | speech_start      0.0 ms | ttfa    209.1 ms
+             transcript: I need a room with a whiteboard in it. Which ro…
+             reply:      This is a fake reply from FakeBrain. No model p…
+turn_0025  asr     42.9 ms | llm_start    150.2 ms | speech_start      0.0 ms | ttfa    193.1 ms
+             transcript: I also need a projector. What are my options no…
+             reply:      This is a fake reply from FakeBrain. No model p…
+turn_0026  asr     30.4 ms | llm_start    150.2 ms | speech_start      0.0 ms | ttfa    180.6 ms
+             transcript: Can I put it for a Saturday meeting?
+             reply:      This is a fake reply from FakeBrain. No model p…
+--- dialogue 11 ---
+turn_0027  asr     42.9 ms | llm_start    150.2 ms | speech_start      0.0 ms | ttfa    193.0 ms
+             transcript: I'd like to book your room on Monday morning.
+             reply:      This is a fake reply from FakeBrain. No model p…
+turn_0028  asr     40.4 ms | llm_start    150.2 ms | speech_start      0.0 ms | ttfa    190.5 ms
+             transcript: 4 of us and we need the screen to watch a video
+             reply:      This is a fake reply from FakeBrain. No model p…
+turn_0029  asr     27.7 ms | llm_start    150.2 ms | speech_start      0.0 ms | ttfa    177.9 ms
+             transcript: channel clock under the name Ravey
+             reply:      This is a fake reply from FakeBrain. No model p…
+turn_0030  asr     21.6 ms | llm_start    150.2 ms | speech_start      0.0 ms | ttfa    171.8 ms
+             transcript: Yes, please.
+             reply:      This is a fake reply from FakeBrain. No model p…
+--- dialogue 12 ---
+turn_0031  asr     38.1 ms | llm_start    150.2 ms | speech_start      0.0 ms | ttfa    188.3 ms
+             transcript: Can I get a room with a projector for eight peo…
+             reply:      This is a fake reply from FakeBrain. No model p…
+turn_0032  asr     24.0 ms | llm_start    150.2 ms | speech_start      0.0 ms | ttfa    174.2 ms
+             transcript: One in the afternoon works.
+             reply:      This is a fake reply from FakeBrain. No model p…
+turn_0033  asr     48.9 ms | llm_start    150.2 ms | speech_start      0.0 ms | ttfa    199.1 ms
+             transcript: Hang on, there'll be 12 of us now, not 8.
+             reply:      This is a fake reply from FakeBrain. No model p…
+turn_0034  asr     32.1 ms | llm_start    150.2 ms | speech_start      0.0 ms | ttfa    182.3 ms
+             transcript: 5 p.m. under the name Asa.
+             reply:      This is a fake reply from FakeBrain. No model p…
+--- dialogue 13 ---
+turn_0035  asr     45.3 ms | llm_start    150.2 ms | speech_start      0.0 ms | ttfa    195.5 ms
+             transcript: Is there room 410 with the projector on a Sunda…
+             reply:      This is a fake reply from FakeBrain. No model p…
+turn_0036  asr     60.9 ms | llm_start    150.2 ms | speech_start      0.0 ms | ttfa    211.1 ms
+             transcript: Saturday at 11 then for Mariel.
+             reply:      This is a fake reply from FakeBrain. No model p…
+
+trace written to /home/hice1/aroudbari3/CAI_Assignment_4/run_output/asr_7090009/trace.jsonl
+captured audio in /home/hice1/aroudbari3/CAI_Assignment_4/run_output/asr_7090009/tts
+check it with: PYTHONPATH=. python3 check_trace.py --trace /home/hice1/aroudbari3/CAI_Assignment_4/run_output/asr_7090009/trace.jsonl
+
+================ 7. the checker ================
+trace: /home/hice1/aroudbari3/CAI_Assignment_4/run_output/asr_7090009/trace.jsonl
+
+problems
+--------
+none
+
+summary
+-------
+records in trace   36
+passing            36
+rejected           0
+
+time to first audio (passing turns only)
+----------------------------------------
+turn_count         36
+p50_milliseconds   190.3
+p95_milliseconds   212.2
+
+stages (passing turns only)
+---------------------------
+stage                   p50 ms    p95 ms
+asr                       40.1      62.0
+llm_start                150.2     150.2
+speech_start               0.0       0.0
+llm_remaining             50.1      50.1
+time_to_first_audio      190.3     212.2
+
+feed lag (limit 5.0 ms)
+-----------------------
+worst              3.743 ms on turn_0036
+PASS  every turn under 5.0 ms
+
+stage implementations
+---------------------
+  36 turn(s)  {"asr": "FasterWhisperAsr", "brain": "FakeBrain", "tts": "FakeTts"}
+
+*** THIS TRACE WAS PRODUCED WITH FAKE STAGES — NOT A REAL MEASUREMENT ***
+
+verdict
+-------
+PASS
+
+================ 8. feed lag with NO agent work, for comparison ================
+idle feed thread: median 0.057 ms  p95 0.058 ms  worst 0.068 ms
+
+done. trace: run_output/asr_7090009/trace.jsonl
+---------------------------------------
+Begin Slurm Epilog: Nov-15-2026 14:06:32
+Job ID:        7090009
+User ID:       aroudbari3
+Account:       coc
+Job name:      a4-asr
+Resources:     cpu=8,gres/gpu:h100=1,mem=32G,node=1
+Rsrc Used:     cput=00:38:32,vmem=0,walltime=00:04:49,mem=1515692K,energy_used=0
+Partition:     coe-gpu
+QOS:           coe-ice
+Nodes:         atl1-1-03-011-23-0
+---------------------------------------

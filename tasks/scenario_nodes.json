@@ -1,0 +1,50 @@
+{
+  "asal_d01_t01.wav": "timer.set",
+  "asal_d01_t02.wav": "timer.set_second",
+  "asal_d01_t03.wav": "timer.remaining",
+
+  "asal_d02_t01.wav": "reminder.set",
+  "asal_d02_t02.wav": "reminder.cancel",
+
+  "asal_d03_t01.wav": "timer.missing_duration",
+  "asal_d03_t02.wav": "timer.supply_duration",
+  "asal_d03_t03.wav": "timer.extend",
+
+  "asal_d04_t01.wav": "reminder.set_dated",
+  "asal_d04_t02.wav": "reminder.set_second",
+  "asal_d04_t03.wav": "reminder.update",
+  "asal_d04_t04.wav": "reminder.list",
+
+  "asal_d05_t01.wav": "lookup.area_location",
+  "asal_d05_t02.wav": "lookup.area_rule",
+
+  "asal_d06_t01.wav": "lookup.cost_lockers",
+  "asal_d06_t02.wav": "lookup.cost_laminating",
+  "asal_d06_t03.wav": "lookup.policy_room_rules",
+
+  "asal_d07_t01.wav": "lookup.hours_sunday",
+  "asal_d07_t02.wav": "lookup.cafe_closed_sunday",
+
+  "asal_d08_t01.wav": "lookup.hours_conflict",
+  "asal_d08_t02.wav": "lookup.unknown_parking",
+
+  "asal_d09_t01.wav": "lookup.policy_laptop_loan",
+  "asal_d09_t02.wav": "lookup.policy_children",
+
+  "asal_d10_t01.wav": "booking.constraint_feature",
+  "asal_d10_t02.wav": "booking.add_constraint",
+  "asal_d10_t03.wav": "booking.unsatisfiable_day",
+
+  "asal_d11_t01.wav": "booking.open_request",
+  "asal_d11_t02.wav": "booking.constraints",
+  "asal_d11_t03.wav": "booking.time_and_name",
+  "asal_d11_t04.wav": "booking.confirm",
+
+  "asal_d12_t01.wav": "booking.two_constraints",
+  "asal_d12_t02.wav": "booking.choose_time",
+  "asal_d12_t03.wav": "booking.change_capacity",
+  "asal_d12_t04.wav": "booking.time_and_name",
+
+  "asal_d13_t01.wav": "booking.unsatisfiable_sunday",
+  "asal_d13_t02.wav": "booking.alternative_day"
+}
