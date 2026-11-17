@@ -251,6 +251,54 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
         "tokens are never spoken, so they are pure latency; say in the report if you set this.",
     )
 
+    synthesis = parser.add_argument_group(
+        "speech synthesis settings",
+        "The voice, the device and the thread count of the TTS stage. ONNX Runtime sizes its "
+        "thread pool from the machine unless it is told otherwise, which on a 64-CPU node running "
+        "an 8-CPU job is the trap the README warns about.",
+    )
+    synthesis.add_argument(
+        "--tts-voice",
+        default=None,
+        help="Path to the Piper .onnx voice, a directory holding one, or a voice name "
+        f"(default: ${real_tts.VOICE_ENVIRONMENT_VARIABLE}, else a search for "
+        f"{real_tts.DEFAULT_VOICE_NAME} under $HF_HOME).",
+    )
+    synthesis.add_argument(
+        "--tts-device",
+        choices=("auto", "cuda", "cpu"),
+        default=None,
+        help="Where the voice runs; auto picks cuda when ONNX Runtime has a GPU provider "
+        "(default: auto).",
+    )
+    synthesis.add_argument(
+        "--tts-cpu-threads",
+        type=int,
+        default=None,
+        help="Intra-op threads for synthesis (default: --cpu-count).",
+    )
+    synthesis.add_argument(
+        "--tts-length-scale",
+        type=float,
+        default=None,
+        help="Speaking rate; below 1 is faster (default: the voice's own setting).",
+    )
+    synthesis.add_argument(
+        "--tts-chunk-milliseconds",
+        type=int,
+        default=None,
+        help="Split each sentence of audio into chunks this long before writing it to the shim. "
+        "0, the default, writes what Piper produced, which is one chunk per sentence.",
+    )
+
+    synthesis.add_argument(
+        "--tts-trim-leading-silence",
+        action="store_true",
+        help="Drop the roughly 60 ms of silence Piper puts in front of each sentence, so the "
+        "captured audio starts speaking at once. Off by default: what Piper produced is what the "
+        "shim is given. Nothing is ever added in front either way.",
+    )
+
     benchmark = parser.add_argument_group(
         "asr benchmark",
         "Decode one recording again and again and print the percentiles, with no session, no "
@@ -378,6 +426,36 @@ def brain_settings_from(arguments: argparse.Namespace) -> real_brain.BrainSettin
     return real_brain.BrainSettings(**overrides)
 
 
+def tts_settings_from(arguments: argparse.Namespace) -> real_tts.TtsSettings:
+    """Return the speech synthesis settings of this run: command line over environment over defaults."""
+    overrides: dict[str, object] = {}
+
+    for name, value in (
+        ("voice", arguments.tts_voice),
+        ("device", arguments.tts_device),
+        ("length_scale", arguments.tts_length_scale),
+        ("chunk_milliseconds", arguments.tts_chunk_milliseconds),
+    ):
+        if value is not None:
+            overrides[name] = value
+
+    if arguments.tts_trim_leading_silence:
+        overrides["trim_leading_silence"] = True
+
+    # --tts-cpu-threads is this stage's own knob; --cpu-count is the job's and covers it too, so
+    # the sbatch script only has to pass one number.
+    cpu_threads = (
+        arguments.tts_cpu_threads
+        if arguments.tts_cpu_threads is not None
+        else arguments.cpu_count
+    )
+
+    if cpu_threads is not None:
+        overrides["cpu_threads"] = cpu_threads
+
+    return real_tts.TtsSettings(**overrides)
+
+
 def build_stages(arguments: argparse.Namespace) -> tuple[Asr, Brain, Tts]:
     """Return the three stages this run will use, real or fake as asked."""
     speech_recognition = (
@@ -391,7 +469,9 @@ def build_stages(arguments: argparse.Namespace) -> tuple[Asr, Brain, Tts]:
         else real_brain.build(brain_settings_from(arguments))
     )
     speech_synthesis = (
-        fakes.build_tts() if arguments.tts == "fake" else real_tts.build()
+        fakes.build_tts()
+        if arguments.tts == "fake"
+        else real_tts.build(tts_settings_from(arguments))
     )
 
     return speech_recognition, dialogue_manager, speech_synthesis
@@ -450,6 +530,9 @@ def print_banner(
 
     if arguments.brain == "real":
         print(f"brain settings    {brain_settings_from(arguments).resolved().describe()}")
+
+    if arguments.tts == "real":
+        print(f"tts settings      {tts_settings_from(arguments).resolved().describe()}")
 
     if any(getattr(arguments, stage) == "fake" for stage in ("asr", "brain", "tts")):
         print("")
