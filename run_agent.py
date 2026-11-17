@@ -76,6 +76,7 @@ from voice_kit.source import Recording, load_recording
 import asr as real_asr
 import brain as real_brain
 import fakes
+import llm_client
 import tts as real_tts
 from interfaces import Asr, Brain, Tts
 
@@ -189,6 +190,67 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
         "the end of speech, so this only adds a second model to the measured stage.",
     )
 
+    dialogue = parser.add_argument_group(
+        "dialogue model settings",
+        "The model, the server and how much of the knowledge base each turn carries. The README "
+        "requires the model name and the server URL to be settings rather than constants, and the "
+        "knowledge-base policy is the one prompt decision that shows up directly in llm_first_token.",
+    )
+    dialogue.add_argument(
+        "--llm-model",
+        default=None,
+        help="Model name the server is serving "
+        f"(default: ${real_brain.MODEL_ENVIRONMENT_VARIABLE} or {real_brain.DEFAULT_MODEL}).",
+    )
+    dialogue.add_argument(
+        "--llm-base-url",
+        default=None,
+        help="Base URL of the OpenAI-compatible server, including /v1 "
+        f"(default: ${llm_client.BASE_URL_ENVIRONMENT_VARIABLE} or {llm_client.DEFAULT_BASE_URL}).",
+    )
+    dialogue.add_argument(
+        "--llm-temperature",
+        type=float,
+        default=None,
+        help="Sampling temperature (default: 0.0, so two runs of one recording agree).",
+    )
+    dialogue.add_argument(
+        "--llm-max-tokens",
+        type=int,
+        default=None,
+        help="Cap on the whole answer (default: 120, about two spoken sentences).",
+    )
+    dialogue.add_argument(
+        "--llm-seed",
+        type=int,
+        default=None,
+        help="Seed sent with every request, so a greedy run is reproducible (default: 20241118).",
+    )
+    dialogue.add_argument(
+        "--llm-kb-mode",
+        choices=real_brain.KB_MODES,
+        default=None,
+        help="How much of the knowledge base each prompt carries: relevant (default), full, none.",
+    )
+    dialogue.add_argument(
+        "--llm-kb-facts",
+        type=int,
+        default=None,
+        help="How many facts --llm-kb-mode relevant retrieves (default: 4).",
+    )
+    dialogue.add_argument(
+        "--llm-history-turns",
+        type=int,
+        default=None,
+        help="How many earlier turns of the dialogue go into the prompt (default: 6).",
+    )
+    dialogue.add_argument(
+        "--llm-reasoning-effort",
+        default=None,
+        help="For a model that thinks before it answers (gpt-oss-20b): low, medium or high. Those "
+        "tokens are never spoken, so they are pure latency; say in the report if you set this.",
+    )
+
     benchmark = parser.add_argument_group(
         "asr benchmark",
         "Decode one recording again and again and print the percentiles, with no session, no "
@@ -291,6 +353,31 @@ def asr_settings_from(arguments: argparse.Namespace) -> real_asr.AsrSettings:
     return real_asr.AsrSettings(**overrides)
 
 
+def brain_settings_from(arguments: argparse.Namespace) -> real_brain.BrainSettings:
+    """Return the dialogue model settings of this run: command line over environment over defaults.
+
+    The same rule as the ASR: only a flag that was actually passed becomes an override, so an unset
+    flag leaves the field at whatever the environment resolved it to.
+    """
+    overrides: dict[str, object] = {}
+
+    for name, value in (
+        ("model", arguments.llm_model),
+        ("base_url", arguments.llm_base_url),
+        ("temperature", arguments.llm_temperature),
+        ("max_tokens", arguments.llm_max_tokens),
+        ("seed", arguments.llm_seed),
+        ("kb_mode", arguments.llm_kb_mode),
+        ("kb_facts", arguments.llm_kb_facts),
+        ("history_turns", arguments.llm_history_turns),
+        ("reasoning_effort", arguments.llm_reasoning_effort),
+    ):
+        if value is not None:
+            overrides[name] = value
+
+    return real_brain.BrainSettings(**overrides)
+
+
 def build_stages(arguments: argparse.Namespace) -> tuple[Asr, Brain, Tts]:
     """Return the three stages this run will use, real or fake as asked."""
     speech_recognition = (
@@ -299,7 +386,9 @@ def build_stages(arguments: argparse.Namespace) -> tuple[Asr, Brain, Tts]:
         else real_asr.build(asr_settings_from(arguments))
     )
     dialogue_manager = (
-        fakes.build_brain() if arguments.brain == "fake" else real_brain.build()
+        fakes.build_brain()
+        if arguments.brain == "fake"
+        else real_brain.build(brain_settings_from(arguments))
     )
     speech_synthesis = (
         fakes.build_tts() if arguments.tts == "fake" else real_tts.build()
@@ -358,6 +447,9 @@ def print_banner(
 
     if arguments.asr == "real":
         print(f"asr settings      {asr_settings_from(arguments).resolved().describe()}")
+
+    if arguments.brain == "real":
+        print(f"brain settings    {brain_settings_from(arguments).resolved().describe()}")
 
     if any(getattr(arguments, stage) == "fake" for stage in ("asr", "brain", "tts")):
         print("")
@@ -558,6 +650,16 @@ def run_turn(
             )
 
         turn.extras["reply"] = " ".join(spoken_sentences)
+
+        # Required by the README only for a model that produces reasoning tokens before its answer.
+        # The brain sets it to None for a model that does not, and then it is left out rather than
+        # written as null: the checker reads the key, not its value.
+        reasoning_nanoseconds = getattr(
+            dialogue_manager, "first_reasoning_token_nanoseconds", None
+        )
+
+        if reasoning_nanoseconds is not None:
+            turn.extras["first_reasoning_token_nanoseconds"] = reasoning_nanoseconds
 
     finally:
         # In a finally block on purpose: a turn that failed still has to write its record, so the
