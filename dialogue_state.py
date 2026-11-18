@@ -23,7 +23,6 @@ from __future__ import annotations
 import re
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
 
 import spoken_text
 from knowledge_base import KnowledgeBase
@@ -47,7 +46,7 @@ NEEDED_IN_WORDS = {
 }
 
 TIMER_WORDS = re.compile(r"\b(timer|countdown|alarm)\b")
-TIMER_VERBS = re.compile(r"\b(set|start|put|make|begin|give)\b")
+TIMER_VERBS = re.compile(r"\b(set|start|started|starting|put|make|begin|give)\b")
 REMINDER_WORDS = re.compile(r"\b(remind|reminder|reminders)\b")
 CANCEL_WORDS = re.compile(r"\b(cancel|stop|delete|remove|forget|scratch|never mind|nevermind)\b")
 CHANGE_WORDS = re.compile(r"\b(make it|change|extend|add|update|instead|actually)\b")
@@ -132,11 +131,13 @@ class Timer:
 
     def describe(self, now: float) -> str:
         """Return one line for the prompt: what it is for, how long it was set for, what is left."""
-        name = f'"{self.label}"' if self.label else "unnamed"
+        # The amount left comes first, because "how much is left" is what is asked of it. A timer
+        # with no label is "the timer": "unnamed" was read aloud as if it were the label.
+        name = f'the "{self.label}" timer' if self.label else "the timer"
         left = self.remaining_seconds(now)
         state = "finished" if left <= 0 else f"{_seconds_in_words(left)} left"
 
-        return f"{name}: set for {_seconds_in_words(self.seconds)}, {state}"
+        return f"{name}: {state} (set for {_seconds_in_words(self.seconds)} in total)"
 
 
 @dataclass
@@ -242,6 +243,14 @@ class DialogueState:
         if self._handle_cancel(text):
             return
 
+        # "List my timers" / "What reminders do I have?" / "Read my reminders back to me". The
+        # items are spelled out in the note, because with only the TIMERS line in the prompt the
+        # model answered "I don't have a list of your timers".
+        if LIST_WORDS.search(text) or READ_BACK_WORDS.search(text):
+            self._list_items(text)
+
+            return
+
         # The agent asked what time the reminder is for, and this turn answers it. The answer does
         # not have to repeat the word "remind" — "Six in the evening" is a whole turn — so this is
         # checked before the keyword rules below.
@@ -320,9 +329,17 @@ class DialogueState:
             duration = bare * 60 if bare is not None else None
 
         if REMAINING_WORDS.search(text) and duration is None:
-            # A question about a timer, not a change to one. The TIMERS block already answers it.
+            # A question about a timer, not a change to one. The TIMERS block already answers it;
+            # the note says so, because a misheard label ("pesto" for "pasta") otherwise made the
+            # model answer that it had no such timer.
             if not active:
                 self.notes.append("There is no timer running.")
+            else:
+                self.notes.append(
+                    "The user asked how much time is left. Time left: "
+                    + " | ".join(timer.describe(self.clock()) for timer in active)
+                    + "."
+                )
 
             return
 
@@ -388,6 +405,42 @@ class DialogueState:
             return candidate.strip()
 
         return None
+
+    def _list_items(self, text: str) -> None:
+        """Spell out the timers, reminders or bookings the user asked to hear."""
+        now = self.clock()
+        wanted = [kind for kind in ("timer", "reminder", "booking") if kind in text]
+
+        if not wanted:
+            wanted = ["timer", "reminder", "booking"]
+
+        parts = []
+
+        if "timer" in wanted:
+            active = [timer for timer in self.timers if not timer.cancelled and timer.seconds > 0]
+            parts.append(
+                f"{len(active)} timer(s): " + "; ".join(timer.describe(now) for timer in active)
+                if active
+                else "no timers running"
+            )
+
+        if "reminder" in wanted:
+            parts.append(
+                f"{len(self.reminders)} reminder(s): "
+                + "; ".join(reminder.describe() for reminder in self.reminders)
+                if self.reminders
+                else "no reminders"
+            )
+
+        if "booking" in wanted:
+            parts.append(
+                f"{len(self.bookings)} booking(s): "
+                + "; ".join(booking.describe() for booking in self.bookings)
+                if self.bookings
+                else "no bookings"
+            )
+
+        self.notes.append("The user asked for a list. Read it out: " + ". ".join(parts) + ".")
 
     # -- reminders ------------------------------------------------------------------------------
 
@@ -559,13 +612,16 @@ class DialogueState:
         if pending in (NEEDED_BOOKING_PEOPLE, NEEDED_BOOKING_DAY, NEEDED_BOOKING_NAME):
             return True
 
-        # Mid-negotiation, a bare constraint ("Five.", "A projector.", "Yes, under the name Sam")
-        # belongs to the booking in hand.
+        # Mid-negotiation, a bare constraint ("Five.", "A projector.", "Yes, under the name Sam",
+        # "Five pm, under the name Asal") belongs to the booking in hand. The time and the name are
+        # read from the transcript, because parse_person_name needs its original capitalisation.
         if not self.request.is_empty() or self.proposed_room is not None:
             return bool(
                 spoken_text.parse_people(text)
                 or spoken_text.parse_features(text)
                 or spoken_text.parse_day(text)
+                or spoken_text.parse_clock_time(text)
+                or spoken_text.parse_person_name(text)
                 or spoken_text.says_yes(text)
                 or spoken_text.parse_bare_number(text) is not None
             )
@@ -579,6 +635,9 @@ class DialogueState:
         name = spoken_text.parse_person_name(transcript)
 
         if name:
+            if name != self.booking_name:
+                self.notes.append(f"The booking will be under the name {name}.")
+
             self.booking_name = name
 
         # Confirming the room that was proposed last turn.
@@ -621,6 +680,20 @@ class DialogueState:
 
         if self.request.day is None:
             self.needed = NEEDED_BOOKING_DAY
+
+            # "Which rooms do you suggest?" before a day is given. Without the candidates in the
+            # notes the model answered that no room had a whiteboard at all.
+            if self.request.people or self.request.features:
+                fitting = self.knowledge_base.rooms_matching(
+                    capacity=self.request.people, features=tuple(self.request.features)
+                )
+
+                if fitting:
+                    self.notes.append(
+                        "Rooms that fit so far (availability depends on the day): "
+                        + ", ".join(f"{room['name']} (floor {room['floor']})" for room in fitting)
+                        + "."
+                    )
 
             return
 
@@ -799,27 +872,12 @@ class DialogueState:
     def fact_lines(self) -> list[str]:
         """Return the state of this dialogue as the lines that go into the prompt."""
         now = self.clock()
-        lines = [f"NOW: {datetime.now().strftime('%A %H:%M')}."]
 
-        active = [timer for timer in self.timers if not timer.cancelled and timer.seconds > 0]
-
-        if active:
-            lines.append("TIMERS: " + " | ".join(timer.describe(now) for timer in active))
-        else:
-            lines.append("TIMERS: none running.")
-
-        if self.reminders:
-            lines.append(
-                "REMINDERS: " + " | ".join(reminder.describe() for reminder in self.reminders)
-            )
-        else:
-            lines.append("REMINDERS: none.")
-
-        if self.bookings:
-            lines.append("BOOKINGS: " + " | ".join(booking.describe() for booking in self.bookings))
-
-        if not self.request.is_empty() or self.proposed_room is not None:
-            lines.append(f"ROOM REQUEST SO FAR: {self.request.describe()}.")
+        # What this turn did and what it still needs come FIRST. With the state lists first,
+        # Llama 3.2 3B read the first reminder in the list back as the one it had just set (PACE
+        # job 7163276, turn 10). The wall-clock "NOW" line was dropped: no family needs it, and it
+        # made two runs of the same recording send different prompts.
+        lines = []
 
         if self.notes:
             lines.append("WHAT JUST HAPPENED: " + " ".join(self.notes))
@@ -829,5 +887,23 @@ class DialogueState:
                 f"MISSING: {NEEDED_IN_WORDS[self.needed]}. Ask one short question for it and "
                 "nothing else."
             )
+
+        active = [timer for timer in self.timers if not timer.cancelled and timer.seconds > 0]
+
+        # Empty lists are left out: "TIMERS: none running." on every lookup turn was noise the
+        # model sometimes answered instead of the question.
+        if active:
+            lines.append("TIMERS: " + " | ".join(timer.describe(now) for timer in active))
+
+        if self.reminders:
+            lines.append(
+                "REMINDERS: " + " | ".join(reminder.describe() for reminder in self.reminders)
+            )
+
+        if self.bookings:
+            lines.append("BOOKINGS: " + " | ".join(booking.describe() for booking in self.bookings))
+
+        if not self.request.is_empty() or self.proposed_room is not None:
+            lines.append(f"ROOM REQUEST SO FAR: {self.request.describe()}.")
 
         return lines

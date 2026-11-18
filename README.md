@@ -1,3 +1,47 @@
+# Running this submission
+
+Everything below runs on PACE-ICE from the root of this repository. The graded path is the
+Apptainer image built from `recipe/agent.def` plus vLLM from the course's shared environment.
+
+```
+# 1. Build the image once (login or compute node; needs the internet).
+export SCRATCH_DIR=$HOME/scratch && mkdir -p "$SCRATCH_DIR"
+export APPTAINER_CACHEDIR=$SCRATCH_DIR/cache APPTAINER_TMPDIR=$SCRATCH_DIR/tmp
+mkdir -p "$APPTAINER_CACHEDIR" "$APPTAINER_TMPDIR"
+apptainer build --fakeroot "$SCRATCH_DIR/agent.sif" recipe/agent.def
+
+# 2. Run the full agent on one H100 (serves Llama 3.2 3B Instruct with vLLM, then replays recordings/).
+sbatch run_agent.sbatch
+#    other recordings:   sbatch --export=ALL,RECORDINGS_DIR=<dir> run_agent.sbatch
+#    other model:        sbatch --export=ALL,LLM_MODEL=meta-llama/Llama-3.1-8B-Instruct run_agent.sbatch
+
+# 3. Check the trace (the TAs' record_problems), print p50/p95, draw the waterfall.
+PYTHONPATH=. python3 check_trace.py --trace run_output/<job id>/trace.jsonl
+PYTHONPATH=. python3 plot_waterfall.py --trace run_output/<job id>/trace.jsonl --output figures/waterfall.png  # needs matplotlib
+
+# 4. Own-voice WER.
+PYTHONPATH=. python3 wer/score_wer.py --trace run_output/<job id>/trace.jsonl --references references.json
+```
+
+| What | Where |
+|---|---|
+| Turn loop, stage timing, CLI settings | `run_agent.py` |
+| ASR (faster-whisper small.en, GPU float16, greedy) | `asr.py` |
+| Dialogue manager: prompt, streaming, sentence splitting | `brain.py`, `llm_client.py` |
+| Timers, reminders, booking slots and room search (Python, not the LLM) | `dialogue_state.py`, `spoken_text.py`, `knowledge_base.py` |
+| TTS (Piper en_US lessac medium, one sentence at a time) | `tts.py` |
+| Recordings and their confirmed end-of-speech sidecars | `recordings/` |
+| Shipped traces and captured TTS audio of the runs in the report | `run_output_pace/` |
+| Sanity tests (`python3 test/<name>.py`) | `test/` |
+
+Seeds and determinism: the LLM runs at temperature 0 with a per-request seed (`--llm-seed`,
+default 20241118) and vLLM is started with `--seed 42`; the ASR decodes greedily at temperature 0.
+Models are read offline from the shared cache (`HF_HOME`, `HF_HUB_OFFLINE=1`).
+
+The original assignment text follows.
+
+---
+
 # Assignment 4: Voice Agent and Latency Waterfall
 
 Build a spoken assistant. Then account for every millisecond between end of your question and start of its answer.

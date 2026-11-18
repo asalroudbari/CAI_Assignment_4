@@ -393,6 +393,13 @@ class PiperTts:
         options.inter_op_num_threads = 1
         options.graph_optimization_level = onnxruntime.GraphOptimizationLevel.ORT_ENABLE_ALL
 
+        # ONNX Runtime's intra-op workers spin-wait after each op by default. With the pool the
+        # size of the job, those spinning workers hold every core the job has, and the shim's feed
+        # thread (which still delivers the trailing silence of the recording while this stage runs)
+        # wakes late: PACE jobs 7162952 and 7163145 showed max_feed_lag up to 14.8 ms, against
+        # 0.1 ms in the ASR-only job 7124980. Workers that sleep when idle give the core back.
+        options.add_session_config_entry("session.intra_op.allow_spinning", "0")
+
         return options
 
     def _load_voice(self) -> Any:

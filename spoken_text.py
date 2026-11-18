@@ -67,13 +67,14 @@ DURATION_PATTERN = re.compile(
 )
 SECONDS_PER_UNIT = {"h": 3600, "m": 60, "s": 1}
 
-CLOCK_PATTERN = re.compile(r"\b(\d{1,2}):(\d{2})\s*(a\.?m\.?|p\.?m\.?)?")
-HOUR_MERIDIEM_PATTERN = re.compile(r"\b(\d{1,2})\s*(a\.?m\.?|p\.?m\.?)")
+# normalise() turns "p.m." into "p m", so the meridiem may be split by a space as well as by dots.
+CLOCK_PATTERN = re.compile(r"\b(\d{1,2}):(\d{2})\s*(?:([ap])\.?\s?m\b\.?)?")
+HOUR_MERIDIEM_PATTERN = re.compile(r"\b(\d{1,2})\s*([ap])\.?\s?m\b\.?")
 OCLOCK_PATTERN = re.compile(r"\b(\d{1,2})\s*o'?\s?clock\b")
 # "two thirty" survives digitising as "2 30", which is only a clock time when the sentence is
 # talking about a time at all; without this guard "for 5 30 minute timers" would become 05:30.
 SPLIT_CLOCK_PATTERN = re.compile(r"\b(\d{1,2})\s+(\d{2})\b")
-TIME_CUES = re.compile(r"\b(at|by|around|today|tomorrow|tonight|o'?clock|am|pm|a\.m\.|p\.m\.)\b")
+TIME_CUES = re.compile(r"\b(at|by|around|today|tomorrow|tonight|o'?clock|am|pm|a m|p m|a\.m\.|p\.m\.)\b")
 
 PART_OF_DAY = (
     (re.compile(r"\b(in the evening|at night|tonight|this evening)\b"), "pm"),
@@ -278,7 +279,7 @@ def parse_clock_time(text: str) -> ClockTime | None:
     if match:
         hour, minute = int(match.group(1)), int(match.group(2))
         said = match.group(3)
-        marker = said.replace(".", "") if said else meridiem
+        marker = f"{said}m" if said else meridiem
 
         return ClockTime(_to_24_hour(hour, marker) % 24, minute, match.group(0).strip())
 
@@ -287,7 +288,7 @@ def parse_clock_time(text: str) -> ClockTime | None:
     if match:
         hour = int(match.group(1))
 
-        return ClockTime(_to_24_hour(hour, match.group(2).replace(".", "")) % 24, 0, match.group(0))
+        return ClockTime(_to_24_hour(hour, f"{match.group(2)}m") % 24, 0, match.group(0))
 
     match = OCLOCK_PATTERN.search(digits)
 
@@ -366,7 +367,8 @@ def parse_date(text: str) -> str | None:
     )
 
     if said_as_ordinal:
-        match = re.search(r"\bthe (\d{1,2})\b", digits)
+        # "the 19th" keeps its suffix through digitise(), so the suffix is optional here.
+        match = re.search(r"\bthe (\d{1,2})(?:st|nd|rd|th)?\b", digits)
 
         if match and 1 <= int(match.group(1)) <= 31:
             day = int(match.group(1))
@@ -424,7 +426,13 @@ def parse_person_name(text: str) -> str | None:
     )
 
     if not match:
-        return None
+        # "Saturday at eleven then, for Meriam." A bare "for X" counts only as the LAST words of
+        # the utterance and only when X is not a number, a day, a time or a feature word, so
+        # "a room for ten" and "for a projector" never become names.
+        match = re.search(r"\bfor\s+([a-z]+)\s*[.!]?\s*$", text.lower())
+
+        if not match or match.group(1) in NOT_A_NAME or match.group(1) in UNITS or match.group(1) in TENS:
+            return None
 
     word = match.group(1)
 
@@ -432,6 +440,15 @@ def parse_person_name(text: str) -> str | None:
         return None
 
     return word.capitalize()
+
+
+# Words that end an utterance after "for" without being a name.
+NOT_A_NAME = frozenset(
+    "me us you them him her it that this now then today tomorrow tonight later sure people "
+    "everyone everybody all two three four five six seven eight nine ten eleven twelve hundred "
+    "morning afternoon evening noon lunch meeting hours hour minutes minute projector whiteboard "
+    "screen tv quiet video".split()
+) | frozenset(DAYS)
 
 
 def says_yes(text: str) -> bool:

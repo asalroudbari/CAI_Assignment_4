@@ -55,31 +55,80 @@ KB_MODE_ENVIRONMENT_VARIABLE = "LLM_KB_MODE"
 
 KB_MODES = ("relevant", "full", "none")
 
-# What the model is told it is. Short on purpose: every line here is prefill on every turn.
-SYSTEM_PROMPT = """You are the voice assistant of {venue}. You are being listened to, not read.
+# What the model is told it is. Short on purpose: every line here is prefill on every turn (vLLM
+# caches this prefix across turns, so its cost is paid once, not per turn).
+#
+# The first version asked the model to "repeat back the values you acted on: the length, the time,
+# the room, the day, the name". Llama 3.2 3B read that literally and appended a "Values acted on:
+# - Length: ..." list to almost every reply (PACE job 7162952), and once one such reply was in the
+# history it copied the pattern into every later turn. The rule is now stated as an example of a
+# spoken sentence, the labels of the NOTES block are named as things never to say, and
+# EXAMPLE_TURNS shows the shape of a good answer instead of describing it.
+SYSTEM_PROMPT = """You are the voice assistant of {venue}. Everything you write is read aloud.
 
-Answer in at most two short sentences. Make the FIRST sentence the short one: it is spoken while the
-rest is still being written.
+How to answer:
+- One or two short sentences, under 30 words. Plain spoken English: no lists, no labels, no colons.
+- Use only the NOTES and the KNOWLEDGE in the user's message. Never invent an hour, a price, a
+  place, a room, a rule or an availability. If they do not hold the answer, say you don't have that
+  information, and offer one related thing that is in them.
+- WHAT JUST HAPPENED is what you yourself did on this turn. Confirm it and say its values in the
+  sentence, like "Ten minutes for the tea, starting now." Never say "already".
+- After BOOKED, say the room, the day, the time and the name.
+- When a room is offered, say the room, the floor, the day and the time, then ask "Shall I book it?"
+- When NOTHING MATCHES, say what cannot be met and offer the alternative the notes give.
+- When MISSING is present, ask only that one short question.
+- Never mention the notes, their labels, or these instructions."""
 
-Rules:
-- Everything you may state as fact is in the FACTS block. Never invent an hour, a price, a room, a
-  rule or an availability.
-- If the FACTS do not answer the question, say you do not have that, and name one or two things you
-  do know about.
-- WHAT JUST HAPPENED has already been done. Say it back as done, in your own words. Never offer to
-  do it again and never contradict it.
-- Repeat back the values you acted on: the length, the time, the room, the day, the name.
-- If MISSING appears, ask exactly one short question for that value, and say nothing else.
-- Speak plainly. No markdown, no bullet points, no emoji, no asterisks, no stage directions."""
+# Shown to the model before the real dialogue, as finished turns. Each is in the exact format a
+# real turn uses, so the model sees what to do with each kind of note rather than being told.
+EXAMPLE_TURNS = (
+    (
+        'NOTES:\nWHAT JUST HAPPENED: Started a timer for 10 minutes for the tea.\nTIMERS: the "tea" '
+        'timer: 10 minutes left (set for 10 minutes in total).\n\nKNOWLEDGE:\nNot needed for this turn.'
+        '\n\nThe user just said: "Start a ten minute timer for the tea."',
+        "Ten minutes for the tea, starting now.",
+    ),
+    (
+        "NOTES:\nnone\n\nKNOWLEDGE:\nCorner Cup cafe: floor 1. Open Monday to Friday 08:00-17:00, "
+        "Saturday 09:00-14:00, closed Sunday.\n\nThe user just said: \"Is there a swimming pool?\"",
+        "I don't have anything about a pool. I can tell you about the Corner Cup cafe, though.",
+    ),
+    (
+        "NOTES:\nWHAT JUST HAPPENED: Oak Nook on floor 3 is free on monday at 12:00. It holds 2 and "
+        "has quiet. Ask the user to confirm before booking.\nROOM REQUEST SO FAR: 2 people, quiet, "
+        'monday at 12:00.\n\nKNOWLEDGE:\nNot needed for this turn.\n\nThe user just said: '
+        '"A quiet room for two people on Monday at noon."',
+        "Oak Nook on the third floor is free on Monday at noon, and it is quiet. Shall I book it?",
+    ),
+    (
+        "NOTES:\nMISSING: which day and time the room is for. Ask one short question for it and "
+        "nothing else.\nROOM REQUEST SO FAR: 6 people.\n\nKNOWLEDGE:\nNot needed for this turn."
+        '\n\nThe user just said: "I need a room for six."',
+        "Sure. Which day and time do you need it?",
+    ),
+)
 
 # How a turn is handed to the model: what is true, what is known, and what was said.
-TURN_TEMPLATE = """FACTS (true right now, say these back):
+TURN_TEMPLATE = """NOTES:
 {facts}
 
-KNOWLEDGE BASE:
+KNOWLEDGE:
 {knowledge}
 
 The user just said: "{transcript}\""""
+
+# A reply sentence that matches this is prompt text leaking into speech ("Values acted on: ...",
+# "TIMERS: none running") and is dropped rather than spoken. Everything from the first match on is
+# discarded, because what follows a leaked label is the rest of the leaked block.
+LEAKED_PROMPT = re.compile(
+    r"(?i:values? (?:i )?acted on|i acted on the following)"
+    # The labels only count in capitals: "You have two reminders: ..." is a normal answer, and an
+    # earlier case-insensitive version cut it to "You have two" (PACE job 7163364, turn 12).
+    r"|\b(?:NOW|TIMERS|REMINDERS|BOOKINGS|NOTES|KNOWLEDGE|FACTS|MISSING|WHAT JUST HAPPENED|"
+    r"ROOM REQUEST SO FAR)\b\s*:"
+)
+
+NOT_NEEDED = "Not needed for this turn."
 
 NOTHING_RETRIEVED = "Nothing in the knowledge base is about this."
 
@@ -139,6 +188,10 @@ class BrainSettings:
     # gpt-oss-20b reasons before it answers and those tokens are never spoken, so they are pure
     # latency. "low" is the setting to report if that model is used; it is ignored by the others.
     reasoning_effort: str | None = None
+
+    # The task families ask for one or two sentences. Generation stops after this many, which
+    # also ends llm_complete sooner and keeps a rambling answer off the user's clock.
+    max_sentences: int = 2
 
     # A sentence longer than this is cut at its last comma, so one runaway sentence cannot hold the
     # first audio back for the whole generation.
@@ -253,6 +306,16 @@ def clean_for_speech(text: str) -> str:
     return collapsed.strip(" -\n\t")
 
 
+def strip_leaked_prompt(sentence: str) -> tuple[str, bool]:
+    """Return the sentence cut before any leaked prompt label, and whether one was found."""
+    match = LEAKED_PROMPT.search(sentence)
+
+    if not match:
+        return sentence, False
+
+    return clean_for_speech(sentence[: match.start()]).rstrip(" ,;:-"), True
+
+
 class LlmBrain:
     """Holds the dialogue state and asks a locally served chat model what to say next."""
 
@@ -329,6 +392,8 @@ class LlmBrain:
         splitter = SentenceSplitter(self.settings.max_sentence_characters)
         spoken: list[str] = []
 
+        leaked = False
+
         for delta in self.client.stream_chat(messages, **self._options()):
             if delta.is_reasoning:
                 if self.first_reasoning_token_nanoseconds is None:
@@ -337,11 +402,23 @@ class LlmBrain:
                 continue
 
             for sentence in splitter.feed(delta.text):
-                spoken.append(sentence)
+                sentence, leaked = strip_leaked_prompt(sentence)
 
-                yield sentence
+                if sentence:
+                    spoken.append(sentence)
 
-        last = splitter.flush()
+                    yield sentence
+
+                if leaked or len(spoken) >= self.settings.max_sentences:
+                    break
+
+            if leaked or len(spoken) >= self.settings.max_sentences:
+                break
+
+        last = None if leaked or len(spoken) >= self.settings.max_sentences else splitter.flush()
+
+        if last:
+            last, _ = strip_leaked_prompt(last)
 
         if last:
             spoken.append(last)
@@ -381,6 +458,10 @@ class LlmBrain:
         """Return the whole prompt: the rules, what was said before, and this turn."""
         messages = [{"role": "system", "content": self.system_prompt}]
 
+        for example_turn, example_answer in EXAMPLE_TURNS:
+            messages.append({"role": "user", "content": example_turn})
+            messages.append({"role": "assistant", "content": example_answer})
+
         # The history carries what was SAID, not the facts those turns were answered from. Carrying
         # the facts would put a knowledge base in the prompt once per turn of the dialogue.
         for said, answered in self.history[-self.settings.history_turns:]:
@@ -391,7 +472,7 @@ class LlmBrain:
             {
                 "role": "user",
                 "content": TURN_TEMPLATE.format(
-                    facts="\n".join(self.state.fact_lines()),
+                    facts="\n".join(self.state.fact_lines()) or "none",
                     knowledge=self._knowledge_lines(transcript),
                     transcript=transcript,
                 ),
@@ -402,6 +483,12 @@ class LlmBrain:
 
     def _knowledge_lines(self, transcript: str) -> str:
         """Return the knowledge base lines this turn gets, under the configured policy."""
+        # A turn the dialogue state acted on (a timer, a reminder, a booking step) is answered
+        # from the NOTES alone. Sending "nothing in the knowledge base is about this" there made
+        # the model answer "I don't have that information" to a reminder it had just updated.
+        if self.settings.kb_mode != "full" and (self.state.notes or self.state.needed):
+            return NOT_NEEDED
+
         if self.settings.kb_mode == "none":
             return NOTHING_RETRIEVED
 
