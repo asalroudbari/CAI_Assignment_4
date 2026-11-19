@@ -139,8 +139,6 @@ def draw(numbers: dict, output: Path, title: str | None) -> None:
         axes.barh(ttfa_row, measured, left=0, height=bar_height, color=TTFA_COLOUR)
         axes.text(measured + 6, ttfa_row, f"{measured:.1f} ms", ha="left", va="center",
                   color=TEXT_PRIMARY, fontsize=9.5, fontweight="bold")
-        axes.text(measured + 6, ttfa_row + 0.42, f"(sum of the stage {panel_name}s above: {left:.1f} ms)",
-                  ha="left", va="center", color=TEXT_SECONDARY, fontsize=7.5)
         axes.axvline(measured, color=TTFA_COLOUR, linewidth=0.8, linestyle="--", alpha=0.6)
 
         axes.set_yticks(range(len(rows)))
