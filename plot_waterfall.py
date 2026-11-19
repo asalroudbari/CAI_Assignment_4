@@ -43,11 +43,11 @@ from voice_kit import (  # noqa: E402
 
 # Stages on the TTFA path, in time order, with their label and fill colour.
 TTFA_PATH_STAGES = (
-    ("asr", "ASR (end of speech → asr_final)", "#2a78d6"),
-    ("llm_start", "LLM first token (asr_final → llm_first_token)", "#eb6834"),
-    ("speech_start", "TTS first audio (llm_first_token → tts_first_audio)", "#1baf7a"),
+    ("asr", "ASR: end_of_user_speech → asr_final", "#2a78d6"),
+    ("llm_start", "LLM start: asr_final → llm_first_token", "#eb6834"),
+    ("speech_start", "Speech start: llm_first_token → tts_first_audio\n(rest of first sentence + its synthesis)", "#1baf7a"),
 )
-OFF_PATH_STAGE = ("llm_remaining", "Rest of LLM answer (llm_first_token → llm_complete), overlaps TTS")
+OFF_PATH_STAGE = ("llm_remaining", "Not on TTFA path: llm_first_token → llm_complete\n(overlaps speech start)")
 OFF_PATH_COLOUR = "#898781"
 TEXT_PRIMARY = "#1f1f1e"
 TEXT_SECONDARY = "#55544e"

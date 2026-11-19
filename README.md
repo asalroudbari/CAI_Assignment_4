@@ -17,7 +17,7 @@ sbatch run_agent.sbatch
 
 # 3. Check the trace (the TAs' record_problems), print p50/p95, draw the waterfall.
 PYTHONPATH=. python3 check_trace.py --trace run_output/<job id>/trace.jsonl
-PYTHONPATH=. python3 plot_waterfall.py --trace run_output/<job id>/trace.jsonl --output figures/waterfall.png  # needs matplotlib
+PYTHONPATH=. python3 plot_waterfall.py --trace run_output/<job id>/trace.jsonl --output figures/waterfall.png  # needs matplotlib (pip install matplotlib==3.9.4; not in the agent image)
 
 # 4. Own-voice WER.
 PYTHONPATH=. python3 wer/score_wer.py --trace run_output/<job id>/trace.jsonl --references references.json

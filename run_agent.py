@@ -628,7 +628,7 @@ def warm_up_stages(
     print(f"warm up finished in {total:.1f} ms\n")
 
 
-def stamp_once(turn: Turn, event: str) -> bool:
+def stamp_once(turn: Turn, event: str, time_nanoseconds: int | None = None) -> bool:
     """Stamp an event unless it is already stamped; return whether this call stamped it.
 
     Turn.stamp raises on a second stamp of the same event, so every path that could run twice — a
@@ -637,7 +637,7 @@ def stamp_once(turn: Turn, event: str) -> bool:
     if event in turn.events:
         return False
 
-    turn.stamp(event)
+    turn.stamp(event, time_nanoseconds)
 
     return True
 
@@ -710,8 +710,12 @@ def run_turn(
                 continue
 
             if not spoken_sentences:
-                # The first sentence of the answer: this, not any earlier token, is the event.
-                stamp_once(turn, LLM_FIRST_TOKEN)
+                # llm_first_token is the arrival of the first token of the answer (README), which
+                # the brain records on the shim clock as the delta comes in. A brain that does not
+                # record it (the fake) is stamped now, at its first sentence. The time is never
+                # earlier than asr_final: the request is only sent after the transcript exists.
+                first_token = getattr(dialogue_manager, "first_answer_token_nanoseconds", None)
+                stamp_once(turn, LLM_FIRST_TOKEN, first_token)
 
             spoken_sentences.append(sentence)
 

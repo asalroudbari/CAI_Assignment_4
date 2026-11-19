@@ -298,10 +298,45 @@ class SentenceSplitter:
         return last_word in ABBREVIATIONS
 
 
+# The facts are written in 24-hour time and prices with a dollar sign, and the model copies them.
+# Piper reads "09:00" digit by digit and "10:00-16:00" as a subtraction, so they are rewritten into
+# what a person would say before the sentence reaches the TTS.
+CLOCK_RANGE = re.compile(r"\b(\d{1,2}):(\d{2})\s*(?:-|–|to)\s*(\d{1,2}):(\d{2})\b")
+CLOCK = re.compile(r"\b(\d{1,2}):(\d{2})\b")
+DOLLARS = re.compile(r"\$(\d+)(?:\.(\d{2}))?")
+
+
+def _spoken_clock(hour: str, minute: str) -> str:
+    """Return a 24-hour clock time as it is said: "13:30" -> "1:30 PM", "09:00" -> "9 AM"."""
+    hour_number, minute_number = int(hour), int(minute)
+
+    if hour_number == 12 and minute_number == 0:
+        return "noon"
+
+    suffix = "AM" if hour_number < 12 else "PM"
+    hour_12 = hour_number % 12 or 12
+
+    return f"{hour_12} {suffix}" if minute_number == 0 else f"{hour_12}:{minute_number:02d} {suffix}"
+
+
+def spoken_numbers(text: str) -> str:
+    """Return ``text`` with 24-hour times and dollar amounts written the way they are spoken."""
+    text = CLOCK_RANGE.sub(
+        lambda m: f"{_spoken_clock(m.group(1), m.group(2))} to {_spoken_clock(m.group(3), m.group(4))}",
+        text,
+    )
+    text = CLOCK.sub(lambda m: _spoken_clock(m.group(1), m.group(2)), text)
+
+    return DOLLARS.sub(
+        lambda m: f"{m.group(1)} dollars" + (f" {int(m.group(2))} cents" if m.group(2) and int(m.group(2)) else ""),
+        text,
+    )
+
+
 def clean_for_speech(text: str) -> str:
     """Return ``text`` with anything a synthesiser should not read aloud removed."""
     without_markdown = MARKDOWN.sub("", text)
-    collapsed = re.sub(r"\s+", " ", without_markdown)
+    collapsed = re.sub(r"\s+", " ", spoken_numbers(without_markdown))
 
     return collapsed.strip(" -\n\t")
 
@@ -334,6 +369,10 @@ class LlmBrain:
         # Read by the turn loop into extras.first_reasoning_token_nanoseconds, for a model that
         # thinks before it answers. It stays None for a model that does not.
         self.first_reasoning_token_nanoseconds: int | None = None
+
+        # When the first token of the ANSWER arrived from the server, on the shim's clock. The
+        # README defines llm_first_token as exactly this; the turn loop stamps the event with it.
+        self.first_answer_token_nanoseconds: int | None = None
 
         # Set by tools/try_brain.py to see the prompt of each turn. It is called from inside
         # reply(), AFTER the state has been updated and before the request goes out, because the
@@ -379,6 +418,7 @@ class LlmBrain:
         """Yield the answer to ``text``, one whole sentence at a time, first sentence as early as possible."""
         transcript = (text or "").strip()
         self.first_reasoning_token_nanoseconds = None
+        self.first_answer_token_nanoseconds = None
 
         # Python reads the utterance and applies what it clearly asks for BEFORE the model is
         # called, so the prompt can state what is now true rather than ask the model to work it out.
@@ -400,6 +440,9 @@ class LlmBrain:
                     self.first_reasoning_token_nanoseconds = now_nanoseconds()
 
                 continue
+
+            if self.first_answer_token_nanoseconds is None and delta.text.strip():
+                self.first_answer_token_nanoseconds = now_nanoseconds()
 
             for sentence in splitter.feed(delta.text):
                 sentence, leaked = strip_leaked_prompt(sentence)
