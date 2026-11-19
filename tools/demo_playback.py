@@ -1,7 +1,7 @@
 """Plays a recorded PACE-ICE run back as a conversation, for the demo video.
 
     PYTHONPATH=. python3 tools/demo_playback.py
-    PYTHONPATH=. python3 tools/demo_playback.py --dialogues jae_d21 asal_d06 jae_d31
+    PYTHONPATH=. python3 tools/demo_playback.py --dialogues asal_d03 jae_d31 asal_d06
 
 PACE-ICE has no microphone and no speaker, so the agent is measured by replaying recordings through
 the voice_kit shim and capturing what the TTS writes. This tool plays one such run back on a laptop,
@@ -36,7 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from voice_kit.source import load_recording  # noqa: E402
 
 DEFAULT_RUN = Path("run_output_pace/full_7164027")
-DEFAULT_DIALOGUES = ("jae_d21", "asal_d06", "jae_d31")  # one per task family, both voices
+DEFAULT_DIALOGUES = ("asal_d03", "jae_d31", "asal_d06")  # one per task family, voices alternate
 # How loud each user clip is made for playback (peak level), and the most it may be amplified.
 DEFAULT_USER_PEAK_DBFS = -3.0
 MAX_GAIN = 20.0
