@@ -35,7 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from voice_kit.source import load_recording  # noqa: E402
 
-DEFAULT_RUN = Path("run_output_pace/full_7164027")
+DEFAULT_RUN = Path("run_output_pace/full_7169606")
 DEFAULT_DIALOGUES = ("asal_d03", "jae_d31", "asal_d06")  # one per task family, voices alternate
 # How loud each user clip is made for playback (peak level), and the most it may be amplified.
 DEFAULT_USER_PEAK_DBFS = -3.0

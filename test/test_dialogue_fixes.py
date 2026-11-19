@@ -94,6 +94,27 @@ def main() -> int:
         "Booked.",
     )
 
+    # 10. Clock and head-count phrasings found in the unseen-dialogue check.
+    check("three thirty pm", clock("at three thirty pm"), "15:30")
+    check("quarter to five", clock("quarter to five"), "16:45")
+    check("first thing is no hour", clock("first thing in the morning"), None)
+    check("just me", spoken_text.parse_people("Book the Oak Nook for Friday at 1, it's just me."), 1)
+    check("just me and one other", spoken_text.parse_people("Just me and one other person."), 2)
+
+    # 9. A bare name right after the agent asked for one completes the booking (probe 7167867).
+    state = run_dialogue([
+        "Book me something with a video call kit for Thursday at 2.",
+        "Sounds good.",
+        "Lee.",
+    ])
+    check("bare name books", [booking.name for booking in state.bookings], ["Lee"])
+
+    # 8. Only 24-hour times are rewritten for speech; a 12-hour time the model wrote is kept.
+    check("24-hour time spoken", brain.spoken_numbers("free on thursday at 15:00."), "free on thursday at 3 PM.")
+    check("opening hours range", brain.spoken_numbers("sunday 10:00-16:00"), "sunday 10 AM to 4 PM")
+    check("12-hour time kept", brain.spoken_numbers("at 3:30 in the afternoon"), "at 3:30 in the afternoon")
+    check("10:00 with pm kept", brain.spoken_numbers("at 10:00 pm"), "at 10:00 pm")
+
     print("all passed")
     return 0
 

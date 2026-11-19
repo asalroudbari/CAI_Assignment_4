@@ -83,7 +83,7 @@ PART_OF_DAY = (
 )
 
 PEOPLE_PATTERN = re.compile(
-    r"\b(?:for|holds?|seats?|fits?|group of|party of|room for|table for)\s+(\d{1,3})\b"
+    r"\b(?:for|holds?|seats?|fits?|group of|party of|team of|room for|table for)\s+(\d{1,3})\b"
 )
 PEOPLE_SUFFIX_PATTERN = re.compile(r"\b(\d{1,3})\s+(?:people|persons?|of us|guests?)\b")
 
@@ -263,9 +263,29 @@ def _to_24_hour(hour: int, meridiem: str | None) -> int:
     return hour
 
 
+def _clock_phrases(digits: str) -> str:
+    """Return ``digits`` with spoken clock phrases rewritten as "H:MM".
+
+    "half past 3" -> "3:30", "quarter to 5" -> "4:45", and "3 30 pm" (from "three thirty pm",
+    which used to read as 18:00) -> "3:30 pm". A minute count ("3 30 minutes") is left alone.
+    """
+    digits = re.sub(r"\b(?:a )?half past (\d{1,2})\b", r"\1:30", digits)
+    digits = re.sub(r"\b(?:a )?quarter past (\d{1,2})\b", r"\1:15", digits)
+    digits = re.sub(r"\b(?:a )?quarter to (\d{1,2})\b",
+                    lambda m: f"{(int(m.group(1)) - 2) % 12 + 1}:45", digits)
+
+    return re.sub(
+        r"\b(\d{1,2}) ([1-5]\d)\b(?!\s*(?:minute|min|hour|second|people|person|of us))",
+        lambda m: f"{m.group(1)}:{m.group(2)}" if int(m.group(1)) <= 12 else m.group(0),
+        digits,
+    )
+
+
 def parse_clock_time(text: str) -> ClockTime | None:
     """Return the time of day the utterance names, or ``None``."""
-    digits = digitise(text)
+    # "first thing in the morning" is no hour at all; its "first" used to read as 1 o'clock.
+    text = re.sub(r"\bfirst thing\b", " ", text, flags=re.IGNORECASE)
+    digits = _clock_phrases(digitise(text))
     meridiem = _meridiem_from_context(digits)
 
     if re.search(r"\b(noon|midday)\b", digits):
@@ -382,6 +402,22 @@ def parse_date(text: str) -> str | None:
 def parse_people(text: str) -> int | None:
     """Return how many people the utterance mentions, or ``None``."""
     digits = digitise(text)
+
+    # "me and two friends", "just me and one other person", "it's just me", "a dozen people": the
+    # speaker counts as one. The "me and ..." forms are read first, so "just me and one other" is 2.
+    match = re.search(r"\bme and (\d{1,2}) (?:friends?|others?|colleagues?|people|more)\b", digits)
+
+    if match:
+        return int(match.group(1)) + 1
+
+    if re.search(r"\bme and (?:a|my|1) (?:friend|colleague|coworker|partner|other)\b", digits):
+        return 2
+
+    if re.search(r"\ba dozen\b", digits):
+        return 12
+
+    if re.search(r"\b(?:just|only) me\b|\bby myself\b|\bon my own\b|\bjust myself\b", digits):
+        return 1
 
     for pattern in (PEOPLE_SUFFIX_PATTERN, PEOPLE_PATTERN):
         match = pattern.search(digits)

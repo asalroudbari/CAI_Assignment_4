@@ -233,6 +233,14 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
         help="How much of the knowledge base each prompt carries: relevant (default), full, none.",
     )
     dialogue.add_argument(
+        "--llm-nlu",
+        choices=real_brain.NLU_MODES,
+        default=None,
+        help="Who reads timer, reminder and booking requests: rules (default), llm (the served "
+        "model returns JSON actions; a second LLM call per turn, counted in llm_start), or hybrid "
+        "(rules first, the model only on turns the rules read nothing from).",
+    )
+    dialogue.add_argument(
         "--llm-kb-facts",
         type=int,
         default=None,
@@ -417,6 +425,7 @@ def brain_settings_from(arguments: argparse.Namespace) -> real_brain.BrainSettin
         ("seed", arguments.llm_seed),
         ("kb_mode", arguments.llm_kb_mode),
         ("kb_facts", arguments.llm_kb_facts),
+        ("nlu", arguments.llm_nlu),
         ("history_turns", arguments.llm_history_turns),
         ("reasoning_effort", arguments.llm_reasoning_effort),
     ):
@@ -747,6 +756,13 @@ def run_turn(
 
         if reasoning_nanoseconds is not None:
             turn.extras["first_reasoning_token_nanoseconds"] = reasoning_nanoseconds
+
+        # With --llm-nlu llm: what the model read from the utterance, and how long that call took.
+        intent_milliseconds = getattr(dialogue_manager, "intent_milliseconds", None)
+
+        if intent_milliseconds is not None:
+            turn.extras["intent_milliseconds"] = round(intent_milliseconds, 1)
+            turn.extras["intent_actions"] = getattr(dialogue_manager, "intent_actions", None)
 
     finally:
         # In a finally block on purpose: a turn that failed still has to write its record, so the

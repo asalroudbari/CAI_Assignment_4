@@ -13,8 +13,11 @@
 # Run it, from the root of the repository:
 #   sbatch run_agent.sbatch
 #   sbatch --export=ALL,RECORDINGS_DIR=peer_recordings run_agent.sbatch
-#   sbatch --export=ALL,LLM_MODEL=meta-llama/Llama-3.2-1B-Instruct run_agent.sbatch
+#   sbatch --export=ALL,LLM_MODEL=meta-llama/Llama-3.2-3B-Instruct,LLM_NLU=rules run_agent.sbatch
 #   sbatch --export=ALL,EXTRA_AGENT_ARGS="--llm-kb-mode full" run_agent.sbatch
+#
+# Default: gpt-oss-20b at reasoning effort low, reading every utterance into JSON actions
+# (--llm-nlu llm, intent_reader.py) before it phrases the reply.
 #
 # The trace and the captured TTS audio land in run_output/<job id>/ (trace.jsonl, tts/).
 
@@ -30,10 +33,21 @@ set -euo pipefail
 # ---- Settings (every one can be overridden from the environment) ------------------------------
 SCRATCH_DIR="${SCRATCH_DIR:-$HOME/scratch}"
 IMAGE="${IMAGE:-$SCRATCH_DIR/agent.sif}"
-LLM_MODEL="${LLM_MODEL:-meta-llama/Llama-3.2-3B-Instruct}"
+LLM_MODEL="${LLM_MODEL:-openai/gpt-oss-20b}"
+LLM_NLU="${LLM_NLU:-llm}"                # llm | hybrid | rules (see run_agent.py --llm-nlu)
 RECORDINGS_DIR="${RECORDINGS_DIR:-recordings}"
 OUTPUT_DIR="${OUTPUT_DIR:-run_output/${SLURM_JOB_ID}}"
 EXTRA_AGENT_ARGS="${EXTRA_AGENT_ARGS:-}"
+
+# gpt-oss-20b reasons before it answers: vLLM separates that channel (--reasoning-parser), the agent
+# asks for the lowest effort, and the token cap leaves room for the reasoning before the answer.
+case "${LLM_MODEL}" in
+    *gpt-oss*) DEFAULT_VLLM_ARGS="--reasoning-parser openai_gptoss"
+               MODEL_AGENT_ARGS="--llm-reasoning-effort low --llm-max-tokens 512" ;;
+    *)         DEFAULT_VLLM_ARGS=""
+               MODEL_AGENT_ARGS="" ;;
+esac
+VLLM_EXTRA_ARGS="${VLLM_EXTRA_ARGS:-${DEFAULT_VLLM_ARGS}}"
 # ----------------------------------------------------------------------------------------------
 
 REPO_ROOT="${SLURM_SUBMIT_DIR}"
@@ -80,6 +94,7 @@ python -m vllm.entrypoints.openai.api_server \
     --max-model-len 4096 \
     --gpu-memory-utilization 0.60 \
     --seed 42 \
+    ${VLLM_EXTRA_ARGS} \
     > "${VLLM_LOG}" 2>&1 &
 VLLM_PID=$!
 trap 'kill "${VLLM_PID}" 2>/dev/null || true' EXIT
@@ -135,6 +150,8 @@ apptainer exec --nv \
     --llm-model "${LLM_MODEL}" \
     --llm-base-url "http://127.0.0.1:${PORT}/v1" \
     --cpu-count "${CPU_COUNT}" \
+    --llm-nlu "${LLM_NLU}" \
+    ${MODEL_AGENT_ARGS} \
     ${EXTRA_AGENT_ARGS}
 
 echo ""

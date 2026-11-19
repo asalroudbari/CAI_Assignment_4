@@ -40,8 +40,10 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Iterator
 
+import intent_reader
 import knowledge_base as knowledge_base_module
 import llm_client
+import dialogue_state
 from dialogue_state import DialogueState
 from interfaces import Brain
 from voice_kit import now_nanoseconds
@@ -54,6 +56,12 @@ MODEL_ENVIRONMENT_VARIABLE = llm_client.MODEL_ENVIRONMENT_VARIABLE
 KB_MODE_ENVIRONMENT_VARIABLE = "LLM_KB_MODE"
 
 KB_MODES = ("relevant", "full", "none")
+
+# Who reads the utterance into timer, reminder and booking actions: the hand-written rules in
+# dialogue_state ("rules"), the served model through intent_reader ("llm"), or the rules first and
+# the model only on a turn the rules read nothing from ("hybrid").
+NLU_ENVIRONMENT_VARIABLE = "LLM_NLU"
+NLU_MODES = ("rules", "llm", "hybrid")
 
 # What the model is told it is. Short on purpose: every line here is prefill on every turn (vLLM
 # caches this prefix across turns, so its cost is paid once, not per turn).
@@ -70,13 +78,15 @@ How to answer:
 - One or two short sentences, under 30 words. Plain spoken English: no lists, no labels, no colons.
 - Use only the NOTES and the KNOWLEDGE in the user's message. Never invent an hour, a price, a
   place, a room, a rule or an availability. If they do not hold the answer, say you don't have that
-  information, and offer one related thing that is in them.
+  information, and offer one related thing that is in them. Do not add directions, advice or
+  suggestions that are not written there (no keycards, websites or staff the knowledge never names).
 - WHAT JUST HAPPENED is what you yourself did on this turn. Confirm it and say its values in the
   sentence, like "Ten minutes for the tea, starting now." Never say "already".
 - After BOOKED, say the room, the day, the time and the name.
 - When a room is offered, say the room, the floor, the day and the time, then ask "Shall I book it?"
 - When NOTHING MATCHES, say what cannot be met and offer the alternative the notes give.
-- When MISSING is present, ask only that one short question.
+- When MISSING is present, first answer what the user asked from the notes, then ask that one short
+  question. If the user asked which rooms fit, name the rooms the notes list before asking.
 - Never mention the notes, their labels, or these instructions."""
 
 # Shown to the model before the real dialogue, as finished turns. Each is in the exact format a
@@ -101,10 +111,11 @@ EXAMPLE_TURNS = (
         "Oak Nook on the third floor is free on Monday at noon, and it is quiet. Shall I book it?",
     ),
     (
-        "NOTES:\nMISSING: which day and time the room is for. Ask one short question for it and "
-        "nothing else.\nROOM REQUEST SO FAR: 6 people.\n\nKNOWLEDGE:\nNot needed for this turn."
-        '\n\nThe user just said: "I need a room for six."',
-        "Sure. Which day and time do you need it?",
+        "NOTES:\nWHAT JUST HAPPENED: Rooms that fit so far (availability depends on the day): Elm Room "
+        "(floor 2), Cedar Room (floor 1).\nMISSING: which day and time the room is for. Ask one short "
+        "question for it.\nROOM REQUEST SO FAR: 6 people, whiteboard.\n\nKNOWLEDGE:\nNot needed for "
+        'this turn.\n\nThe user just said: "We need a room for six with a whiteboard."',
+        "Elm Room on the second floor and Cedar Room on the first floor fit. Which day and time do you need it?",
     ),
 )
 
@@ -181,6 +192,7 @@ class BrainSettings:
         default_factory=lambda: os.environ.get(KB_MODE_ENVIRONMENT_VARIABLE, "relevant")
     )
     kb_facts: int = 4
+    nlu: str = field(default_factory=lambda: os.environ.get(NLU_ENVIRONMENT_VARIABLE, "rules"))
     kb_path: Path = knowledge_base_module.DEFAULT_PATH
 
     timeout_seconds: float = 60.0
@@ -202,6 +214,9 @@ class BrainSettings:
         if self.kb_mode not in KB_MODES:
             raise ValueError(f"--llm-kb-mode must be one of {KB_MODES}, not {self.kb_mode!r}")
 
+        if self.nlu not in NLU_MODES:
+            raise ValueError(f"--llm-nlu must be one of {NLU_MODES}, not {self.nlu!r}")
+
         return replace(self, kb_path=Path(self.kb_path))
 
     def describe(self) -> str:
@@ -209,7 +224,7 @@ class BrainSettings:
         return (
             f"{self.model} at {self.base_url} temperature={self.temperature} "
             f"max_tokens={self.max_tokens} kb_mode={self.kb_mode} kb_facts={self.kb_facts} "
-            f"history_turns={self.history_turns}"
+            f"history_turns={self.history_turns} nlu={self.nlu}"
             + (f" reasoning_effort={self.reasoning_effort}" if self.reasoning_effort else "")
         )
 
@@ -301,8 +316,12 @@ class SentenceSplitter:
 # The facts are written in 24-hour time and prices with a dollar sign, and the model copies them.
 # Piper reads "09:00" digit by digit and "10:00-16:00" as a subtraction, so they are rewritten into
 # what a person would say before the sentence reaches the TTS.
-CLOCK_RANGE = re.compile(r"\b(\d{1,2}):(\d{2})\s*(?:-|–|to)\s*(\d{1,2}):(\d{2})\b")
-CLOCK = re.compile(r"\b(\d{1,2}):(\d{2})\b")
+# Only the zero-padded 24-hour form the notes and the knowledge base use ("09:00", "15:00") is
+# rewritten. A 12-hour time the model wrote itself ("3:30 in the afternoon", "3:00 pm") is left as
+# it is: rewriting it as 24-hour gave "3:30 AM in the afternoon" (job 7167867).
+MERIDIEM_AFTER = r"(?!\s*(?:[ap]\.?m\b|in the (?:morning|afternoon|evening)|o'clock))"
+CLOCK_RANGE = re.compile(r"\b(\d{2}):(\d{2})\s*(?:-|–|to)\s*(\d{2}):(\d{2})\b")
+CLOCK = re.compile(r"\b(\d{2}):(\d{2})\b" + MERIDIEM_AFTER, re.IGNORECASE)
 DOLLARS = re.compile(r"\$(\d+)(?:\.(\d{2}))?")
 
 
@@ -364,6 +383,21 @@ class LlmBrain:
             timeout_seconds=self.settings.timeout_seconds,
         )
         self.system_prompt = SYSTEM_PROMPT.format(venue=self.knowledge_base.venue_name)
+
+        # With --llm-nlu llm the model reads each utterance into JSON actions before it answers.
+        self.intent_reader = None
+
+        if self.settings.nlu in ("llm", "hybrid"):
+            self.intent_reader = intent_reader.IntentReader(
+                self.client,
+                self._options(),
+                room_names=[room["name"] for room in self.knowledge_base.rooms],
+                features=sorted({feature for room in self.knowledge_base.rooms for feature in room["features"]}),
+            )
+
+        # What the intent reader returned this turn and how long it took, for the trace.
+        self.intent_actions: list[dict] | None = None
+        self.intent_milliseconds: float | None = None
         self.history: list[tuple[str, str]] = []
 
         # Read by the turn loop into extras.first_reasoning_token_nanoseconds, for a model that
@@ -420,9 +454,9 @@ class LlmBrain:
         self.first_reasoning_token_nanoseconds = None
         self.first_answer_token_nanoseconds = None
 
-        # Python reads the utterance and applies what it clearly asks for BEFORE the model is
-        # called, so the prompt can state what is now true rather than ask the model to work it out.
-        self.state.observe(transcript)
+        # The utterance is read and applied BEFORE the reply is generated, so the prompt can state
+        # what is now true rather than ask the model to work it out.
+        self._read_and_apply(transcript)
 
         messages = self._messages(transcript)
 
@@ -479,6 +513,54 @@ class LlmBrain:
             yield EMPTY_ANSWER_REPLY
 
         self.history.append((transcript, " ".join(spoken)))
+
+    def _read_and_apply(self, transcript: str) -> None:
+        """Update the dialogue state from this utterance, with the rules or with the model."""
+        self.intent_actions = None
+        self.intent_milliseconds = None
+
+        if self.intent_reader is None:
+            self.state.observe(transcript)
+
+            return
+
+        if self.settings.nlu == "hybrid":
+            pending = self.state.needed
+            self.state.observe(transcript)
+
+            # The rules acted (a note, or a new question to ask): keep their reading, no model call.
+            # "There was nothing to cancel" is the rules failing to find the target ("Cancel the
+            # eggs one" names no timer word), so that turn goes to the model as well.
+            unread = self.state.notes == [dialogue_state.NOTHING_TO_CANCEL]
+
+            if (self.state.notes or self.state.needed != pending) and not unread:
+                return
+
+            self.state.notes = []
+
+            # Nothing read. observe() left the state as it was and put the pending question back,
+            # so the model reads the same turn from the same state.
+            self.state.needed = pending
+
+        last_reply = self.history[-1][1] if self.history else None
+
+        try:
+            actions = self.intent_reader.read(self.state, transcript, last_reply=last_reply)
+            actions = intent_reader.plausible(actions, self.state, transcript)
+
+        except (llm_client.LlmError, ValueError, KeyError) as error:
+            # A failed read must not lose the turn: fall back to the rules for this one.
+            print(f"brain: intent read failed ({error}); using the rules.", file=sys.stderr, flush=True)
+            self.intent_milliseconds = self.intent_reader.last_milliseconds
+
+            if self.settings.nlu == "llm":
+                self.state.observe(transcript)
+
+            return
+
+        self.intent_actions = actions
+        self.intent_milliseconds = self.intent_reader.last_milliseconds
+        self.state.apply_actions(actions)
 
     # -- the prompt -----------------------------------------------------------------------------
 

@@ -36,6 +36,8 @@ NEEDED_BOOKING_PEOPLE = "booking_people"
 NEEDED_BOOKING_DAY = "booking_day"
 NEEDED_BOOKING_NAME = "booking_name"
 
+NOTHING_TO_CANCEL = "There was nothing to cancel."
+
 NEEDED_IN_WORDS = {
     NEEDED_TIMER_DURATION: "how long the timer should run",
     NEEDED_REMINDER_TIME: "what time the reminder is for",
@@ -146,6 +148,8 @@ class Reminder:
 
     subject: str
     when: str | None = None
+    # A date said without a time of day ("today", "on the 19th"), kept until the time is given.
+    day: str | None = None
 
     def describe(self) -> str:
         """Return one line for the prompt."""
@@ -586,7 +590,7 @@ class DialogueState:
 
             return True
 
-        self.notes.append("There was nothing to cancel.")
+        self.notes.append(NOTHING_TO_CANCEL)
 
         return True
 
@@ -634,16 +638,36 @@ class DialogueState:
 
         name = spoken_text.parse_person_name(transcript)
 
+        # "Lee." on its own, right after the agent asked for the name: the whole turn is the name.
+        if name is None and pending == NEEDED_BOOKING_NAME:
+            bare = transcript.strip().strip(".!,")
+
+            if re.fullmatch(r"[A-Z][a-zA-Z'-]+(?: [A-Z][a-zA-Z'-]+)?", bare):
+                name = bare
+
         if name:
             if name != self.booking_name:
                 self.notes.append(f"The booking will be under the name {name}.")
 
             self.booking_name = name
 
+        # The name was the only thing missing after a yes, so giving it completes that yes.
+        yes = spoken_text.says_yes(text) or bool(
+            pending == NEEDED_BOOKING_NAME and name and self.proposed_room is not None
+        )
+        self._advance_booking(
+            yes=yes,
+            yes_alone=yes and not (spoken_text.parse_people(text) or spoken_text.parse_day(text)),
+        )
+
+    def _advance_booking(self, yes: bool, yes_alone: bool) -> None:
+        """Take the booking one step on from its constraints: ask, refuse, propose or confirm.
+
+        ``yes`` is whether the user said yes this turn; ``yes_alone`` is a yes that brought no new
+        constraint with it, which confirms the room that was proposed last turn.
+        """
         # Confirming the room that was proposed last turn.
-        if self.proposed_room is not None and spoken_text.says_yes(text) and not (
-            spoken_text.parse_people(text) or spoken_text.parse_day(text)
-        ):
+        if self.proposed_room is not None and yes_alone:
             if not self.booking_name:
                 self.needed = NEEDED_BOOKING_NAME
                 self.notes.append("The room is ready to book; only the name is missing.")
@@ -705,7 +729,7 @@ class DialogueState:
         self._search_rooms()
 
         # A name given together with a confirmation closes the booking in one turn.
-        if self.proposed_room is not None and self.booking_name and spoken_text.says_yes(text):
+        if self.proposed_room is not None and self.booking_name and yes:
             self._confirm_booking()
 
     def _room_named(self, text: str) -> dict | None:
@@ -742,6 +766,7 @@ class DialogueState:
                 self.proposed_room = None
 
             self.request.people = people
+            self._release_named_room_if_too_small()
 
         for feature in spoken_text.parse_features(transcript):
             if feature not in self.request.features:
@@ -766,6 +791,22 @@ class DialogueState:
         for part in PART_OF_DAY_HOURS:
             if re.search(rf"\b{part}\b", text):
                 self.request.part_of_day = part
+
+    def _release_named_room_if_too_small(self) -> None:
+        """Stop holding on to a room the user named once it cannot hold the people now coming.
+
+        "Book the Oak Nook ... it's just me" then "Actually there will be four of us": Oak Nook holds
+        2, so searching only Oak Nook could never succeed. The name was a choice of room for one
+        person; four people need the normal search, which may find another room at the same time.
+        """
+        if self.chosen_room_id is None or not self.request.people:
+            return
+
+        room = next(room for room in self.knowledge_base.rooms if room["id"] == self.chosen_room_id)
+
+        if room["capacity"] < self.request.people:
+            self.chosen_room_id = None
+            self.notes.append(f"{room['name']} holds only {room['capacity']}, so other rooms were searched.")
 
     def _hours_allowed(self) -> tuple[int, int]:
         """Return the hour window the user asked for: the part of the day, or the whole day."""
@@ -866,6 +907,262 @@ class DialogueState:
         self.request = BookingRequest()
 
     # -------------------------------------------------------------------------------------------
+    # Carrying out actions the LLM read from the utterance (intent_reader, --nlu llm)
+    # -------------------------------------------------------------------------------------------
+
+    def apply_actions(self, actions: list[dict]) -> None:
+        """Carry out the actions ``intent_reader`` read from one utterance, instead of ``observe``.
+
+        The reading came from the model; everything done with it is the same Python as the rules
+        path: the timers and their arithmetic, the reminders, the room search and the confirmation.
+        Only values the action carries are used, and a missing one is asked for, never invented.
+        """
+        self.notes = []
+        pending = self.needed
+        self.needed = None
+        booking_actions = []
+
+        for action in actions:
+            kind = action.get("type")
+
+            if kind in ("book_room", "confirm_booking"):
+                booking_actions.append(action)
+            elif kind == "cancel_booking":
+                self.proposed_room = None
+                self.request = BookingRequest()
+                self.notes.append("Dropped the room that was proposed.")
+            elif kind in ("start_timer", "change_timer", "add_to_timer", "cancel_timer", "time_left"):
+                self._timer_action(kind, action, pending)
+            elif kind in ("set_reminder", "change_reminder", "cancel_reminder"):
+                self._reminder_action(kind, action, pending)
+            elif kind == "list":
+                what = action.get("list_what") or "all"
+                self._list_items("timer reminder booking" if what == "all" else what)
+
+        if booking_actions:
+            yes = False
+
+            for action in booking_actions:
+                self._booking_values(action)
+                yes = yes or action.get("type") == "confirm_booking" or bool(
+                    pending == NEEDED_BOOKING_NAME and action.get("name") and self.proposed_room is not None
+                )
+
+            self._advance_booking(yes=yes, yes_alone=yes)
+
+        # Nothing the state acts on (a lookup question): keep waiting for what was asked for.
+        if not self.notes and self.needed is None and pending:
+            self.needed = pending
+
+    def _timer_named(self, label: str | None) -> Timer | None:
+        """Return the running timer the label points at, else the most recent running one."""
+        active = [timer for timer in self.timers if not timer.cancelled and timer.seconds > 0]
+
+        if label:
+            wanted = set(label.lower().split())
+
+            for timer in reversed(active):
+                if timer.label and wanted & set(timer.label.lower().split()):
+                    return timer
+
+        return active[-1] if active else None
+
+    def _timer_action(self, kind: str, action: dict, pending: str | None) -> None:
+        """Start, change, extend, cancel or report a timer from one action."""
+        minutes = action.get("minutes")
+        seconds = int(round(float(minutes) * 60)) if isinstance(minutes, (int, float)) and minutes > 0 else None
+        label = (action.get("label") or "").strip().lower() or None
+        now = self.clock()
+        target = self._timer_named(label)
+
+        if kind == "time_left":
+            if target is None:
+                self.notes.append("There is no timer running.")
+            else:
+                self.notes.append(f"The user asked how much time is left. Time left: {target.describe(now)}.")
+
+            return
+
+        if kind == "cancel_timer":
+            if target is None:
+                self.notes.append("There was no timer to cancel.")
+            else:
+                target.cancelled = True
+                self.notes.append("Cancelled " + (f"the timer for the {target.label}." if target.label else "the timer."))
+
+            return
+
+        if seconds is None and kind != "start_timer":
+            # A change or an extension with no length read: nothing to apply, and no new timer.
+            return
+
+        if seconds is None:
+            # "Put a timer for me": ask for the length, keep the label for when it comes.
+            self.needed = NEEDED_TIMER_DURATION
+            placeholder = Timer(label=label, seconds=0, started_at=now, cancelled=True)
+            self.timers.append(placeholder)
+
+            return
+
+        if kind == "add_to_timer" and target is not None:
+            target.seconds += seconds
+            self.notes.append(
+                f"Added {_seconds_in_words(seconds)} to the timer"
+                + (f" for the {target.label}" if target.label else "")
+                + f". It now has {_seconds_in_words(target.remaining_seconds(now))} left."
+            )
+
+            return
+
+        if kind == "change_timer" and target is not None:
+            target.seconds = seconds
+            target.started_at = now
+            self.notes.append(
+                f"Changed the timer to {_seconds_in_words(seconds)}"
+                + (f" for the {target.label}." if target.label else ".")
+            )
+
+            return
+
+        # A new timer, or the length for the one the agent just asked about.
+        placeholder = self.timers[-1] if self.timers else None
+
+        if pending == NEEDED_TIMER_DURATION and placeholder and placeholder.cancelled and placeholder.seconds == 0:
+            placeholder.seconds, placeholder.started_at, placeholder.cancelled = seconds, now, False
+            placeholder.label = placeholder.label or label
+            timer = placeholder
+        else:
+            timer = Timer(label=label, seconds=seconds, started_at=now)
+            self.timers.append(timer)
+
+        self.notes.append(
+            f"Started a timer for {_seconds_in_words(seconds)}"
+            + (f" for the {timer.label}." if timer.label else ".")
+        )
+
+    @staticmethod
+    def _when_of(action: dict) -> str | None:
+        """Return the date and time of an action as one phrase the agent can say back."""
+        clock = action.get("time")
+        date = (action.get("date") or "").strip() or None
+        spoken = None
+
+        if isinstance(clock, str) and re.fullmatch(r"\d{2}:\d{2}", clock):
+            spoken = spoken_text.ClockTime(int(clock[:2]), int(clock[3:]), clock).spoken()
+
+        if spoken and date:
+            return f"{date} at {spoken}"
+
+        return spoken or date
+
+    def _reminder_action(self, kind: str, action: dict, pending: str | None) -> None:
+        """Set, change or cancel a reminder from one action."""
+        subject = (action.get("subject") or "").strip().rstrip(".") or None
+        when = self._when_of(action)
+        target = (self._matching_reminder(subject.lower()) if subject else None) or (
+            self.reminders[-1] if self.reminders else None
+        )
+
+        if kind == "cancel_reminder":
+            if target is None:
+                self.notes.append("There was no reminder to cancel.")
+            else:
+                self.reminders.remove(target)
+                self.notes.append(f'Cancelled the reminder "{target.subject}".')
+
+            return
+
+        has_time = bool(action.get("time"))
+
+        # The time for the reminder the agent just asked about, or a change to an existing one.
+        # A new reminder about something else ("and another reminder that ...") is not the time
+        # of the one waiting for its time, even while that one is pending (job 7169250).
+        about_target = not subject or (target is not None and self._matching_reminder(subject.lower()) is target)
+
+        if target is not None and when and about_target and (
+            kind == "change_reminder" or (pending == NEEDED_REMINDER_TIME and target.when is None)
+        ):
+            if target.day and has_time and not action.get("date"):
+                when = f"{target.day} at {when}"
+
+            target.when = when
+            self.notes.append(f'Set the time of the reminder "{target.subject}" to {when}.')
+
+            return
+
+        if not subject:
+            self.needed = NEEDED_REMINDER_SUBJECT
+
+            return
+
+        # A reminder is for a time of day, so a date alone ("today") still needs one, as the rules
+        # path asks too.
+        reminder = Reminder(subject=subject, when=when if has_time else None,
+                            day=None if has_time else (action.get("date") or None))
+        self.reminders.append(reminder)
+
+        if reminder.when:
+            self.notes.append(f'Set a reminder: "{subject}" at {reminder.when}.')
+        else:
+            self.notes.append(
+                f'Noted a reminder about "{subject}"' + (f" for {reminder.day}" if reminder.day else "")
+                + ", with no time yet."
+            )
+            self.needed = NEEDED_REMINDER_TIME
+
+    def _booking_values(self, action: dict) -> None:
+        """Fold the booking values of one action into the request being negotiated."""
+        room_name = action.get("room")
+
+        if room_name:
+            named = next((room for room in self.knowledge_base.rooms if room["name"] == room_name), None)
+
+            if named is not None and named["id"] != self.chosen_room_id:
+                self.chosen_room_id = named["id"]
+                self.proposed_room = None
+                self.notes.append(f"The user asked for {named['name']} by name.")
+
+        people = action.get("people")
+
+        if isinstance(people, int) and people > 0 and people != self.request.people:
+            self.request.people = people
+            self.proposed_room = None
+            self._release_named_room_if_too_small()
+
+        for feature in action.get("features") or []:
+            if feature not in self.request.features:
+                self.request.features.append(feature)
+                self.proposed_room = None
+
+        day = action.get("day")
+
+        if day and day != self.request.day:
+            self.request.day = day
+            self.proposed_room = None
+
+        clock = action.get("time")
+
+        if isinstance(clock, str) and re.fullmatch(r"\d{2}:\d{2}", clock):
+            hour = f"{clock[:2]}:00"
+
+            if hour != self.request.hour:
+                self.request.hour = hour
+                self.proposed_room = None
+
+        if action.get("part_of_day") in PART_OF_DAY_HOURS:
+            self.request.part_of_day = action["part_of_day"]
+
+        name = (action.get("name") or "").strip()
+
+        if name:
+            name = name[0].upper() + name[1:]
+
+            if name != self.booking_name:
+                self.notes.append(f"The booking will be under the name {name}.")
+
+            self.booking_name = name
+
+    # -------------------------------------------------------------------------------------------
     # What the model is told
     # -------------------------------------------------------------------------------------------
 
@@ -884,8 +1181,7 @@ class DialogueState:
 
         if self.needed:
             lines.append(
-                f"MISSING: {NEEDED_IN_WORDS[self.needed]}. Ask one short question for it and "
-                "nothing else."
+                f"MISSING: {NEEDED_IN_WORDS[self.needed]}. Ask one short question for it."
             )
 
         active = [timer for timer in self.timers if not timer.cancelled and timer.seconds > 0]

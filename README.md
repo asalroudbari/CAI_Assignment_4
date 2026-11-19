@@ -10,10 +10,10 @@ export APPTAINER_CACHEDIR=$SCRATCH_DIR/cache APPTAINER_TMPDIR=$SCRATCH_DIR/tmp
 mkdir -p "$APPTAINER_CACHEDIR" "$APPTAINER_TMPDIR"
 apptainer build --fakeroot "$SCRATCH_DIR/agent.sif" recipe/agent.def
 
-# 2. Run the full agent on one H100 (serves Llama 3.2 3B Instruct with vLLM, then replays recordings/).
+# 2. Run the full agent on one H100 (serves gpt-oss-20b with vLLM, then replays recordings/).
 sbatch run_agent.sbatch
 #    other recordings:   sbatch --export=ALL,RECORDINGS_DIR=<dir> run_agent.sbatch
-#    other model:        sbatch --export=ALL,LLM_MODEL=meta-llama/Llama-3.1-8B-Instruct run_agent.sbatch
+#    rules-only, 3B:     sbatch --export=ALL,LLM_MODEL=meta-llama/Llama-3.2-3B-Instruct,LLM_NLU=rules run_agent.sbatch
 
 # 3. Check the trace (the TAs' record_problems), print p50/p95, draw the waterfall.
 PYTHONPATH=. python3 check_trace.py --trace run_output/<job id>/trace.jsonl
@@ -27,12 +27,21 @@ PYTHONPATH=. python3 wer/score_wer.py --trace run_output/<job id>/trace.jsonl --
 |---|---|
 | Turn loop, stage timing, CLI settings | `run_agent.py` |
 | ASR (faster-whisper small.en, GPU float16, greedy) | `asr.py` |
-| Dialogue manager: prompt, streaming, sentence splitting | `brain.py`, `llm_client.py` |
-| Timers, reminders, booking slots and room search (Python, not the LLM) | `dialogue_state.py`, `spoken_text.py`, `knowledge_base.py` |
+| Dialogue manager: reply prompt, streaming, sentence splitting | `brain.py`, `llm_client.py` |
+| Reading each utterance into JSON actions with the LLM (`--llm-nlu llm`), checked against the rule parsers | `intent_reader.py` |
+| Carrying the actions out: timers, reminders, booking slots and room search (Python, not the LLM) | `dialogue_state.py`, `spoken_text.py`, `knowledge_base.py` |
 | TTS (Piper en_US lessac medium, one sentence at a time) | `tts.py` |
 | Recordings and their confirmed end-of-speech sidecars | `recordings/` |
 | Shipped traces and captured TTS audio of the runs in the report | `run_output_pace/` |
 | Sanity tests (`python3 test/<name>.py`) | `test/` |
+
+How a turn is handled (default `--llm-nlu llm`): the LLM (gpt-oss-20b, reasoning effort low)
+reads the utterance into JSON actions under a fixed schema (`intent_reader.py`); every value the
+rule parsers in `spoken_text.py` can read from the words (time, people, day, length, features,
+room, name) replaces the model's, except a weekday or a morning/evening the model reads from the
+sense of the sentence; `DialogueState.apply_actions` carries the actions out in Python; the LLM
+then phrases the reply from the resulting notes. That first LLM call is part of the LLM start
+stage (`asr_final` -> `llm_first_token`). If it fails, the turn falls back to the rules.
 
 Seeds and determinism: the LLM runs at temperature 0 with a per-request seed (`--llm-seed`,
 default 20241118) and vLLM is started with `--seed 42`; the ASR decodes greedily at temperature 0.

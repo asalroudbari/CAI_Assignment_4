@@ -168,6 +168,36 @@ class ChatClient:
 
         return [entry.get("id", "") for entry in body.get("data", [])]
 
+    def complete_json(self, messages: list[dict], schema: dict, **options: Any) -> dict:
+        """Return the answer to ``messages`` as one JSON object that follows ``schema``.
+
+        Not streamed: nothing of this answer is spoken, the caller needs all of it before it can act.
+        The server constrains decoding to the schema (vLLM structured outputs), so the text it
+        returns parses; a reply that still does not parse is an error, never a guess.
+        """
+        body = {
+            "messages": messages,
+            "stream": False,
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {"name": "intent", "schema": schema},
+            },
+            **options,
+        }
+        response = self._send("POST", "/chat/completions", body, stream=False)
+
+        if response.status != 200:
+            self._fail(response)
+
+        payload = json.loads(response.read())
+        content = payload["choices"][0]["message"].get("content") or ""
+
+        try:
+            return json.loads(content)
+
+        except json.JSONDecodeError as error:
+            raise LlmError(f"the LLM server returned text that is not JSON: {content[:200]!r}") from error
+
     def stream_chat(self, messages: list[dict], **options: Any) -> Iterator[Delta]:
         """Yield the answer to ``messages`` delta by delta, as the server produces them."""
         body = {"messages": messages, "stream": True, **options}
