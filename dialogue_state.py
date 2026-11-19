@@ -224,6 +224,8 @@ class DialogueState:
         self.chosen_room_id: str | None = None
         self.booking_name: str | None = None
         self.needed: str | None = None
+        # True when ``needed`` is a question left over from an earlier turn, not one this turn raised.
+        self.needed_carried = False
         self.notes: list[str] = []
 
     # -------------------------------------------------------------------------------------------
@@ -240,6 +242,7 @@ class DialogueState:
         text = spoken_text.normalise(transcript)
         pending = self.needed
         self.needed = None
+        self.needed_carried = False
 
         if not text:
             return
@@ -298,6 +301,7 @@ class DialogueState:
         # about. The state is untouched and the model answers from the facts it is given.
         if pending:
             self.needed = pending
+            self.needed_carried = True
 
     # -- timers ---------------------------------------------------------------------------------
 
@@ -920,6 +924,7 @@ class DialogueState:
         self.notes = []
         pending = self.needed
         self.needed = None
+        self.needed_carried = False
         booking_actions = []
 
         for action in actions:
@@ -953,6 +958,7 @@ class DialogueState:
         # Nothing the state acts on (a lookup question): keep waiting for what was asked for.
         if not self.notes and self.needed is None and pending:
             self.needed = pending
+            self.needed_carried = True
 
     def _timer_named(self, label: str | None) -> Timer | None:
         """Return the running timer the label points at, else the most recent running one."""

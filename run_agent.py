@@ -731,13 +731,10 @@ def run_turn(
             for chunk in speech_synthesis.stream(sentence):
                 turn.sink.write(chunk)
 
-            # Honest note: the next sentence is pulled from the brain only once this sentence has
-            # been synthesised, so generation is serialised behind synthesis. That inflates the
-            # llm_remaining stage, which is off the time-to-first-audio path (see STAGES in
-            # voice_kit/trace.py), so it does not touch the headline number — but it is not free, and
-            # the fix is to run the brain on its own thread feeding a sentence queue. Not done yet.
-
-        stamp_once(turn, LLM_COMPLETE)
+        # llm_complete is when the answer was complete as the brain received it (it reads the
+        # stream on its own thread), not when this loop finished synthesising the last sentence. A
+        # brain that does not record it (the fake) is stamped now.
+        stamp_once(turn, LLM_COMPLETE, getattr(dialogue_manager, "answer_complete_nanoseconds", None))
 
         if not spoken_sentences:
             raise EmptyReplyError(

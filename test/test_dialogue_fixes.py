@@ -109,6 +109,28 @@ def main() -> int:
     ])
     check("bare name books", [booking.name for booking in state.bookings], ["Lee"])
 
+    # 11. A lookup asked while a reminder waits for its time still gets the knowledge base.
+    agent = brain.LlmBrain.__new__(brain.LlmBrain)
+    agent.settings = brain.BrainSettings(model="none", base_url="http://127.0.0.1:1/v1")
+    agent.knowledge_base = knowledge_base.load(knowledge_base.DEFAULT_PATH)
+    agent.state = run_dialogue(["Remind me to water the plants."])
+    agent.state.knowledge_base = agent.knowledge_base
+    check("time asked for", agent.state.needed, "reminder_time")
+    agent.state.observe("What time does the cafe close on Saturdays?")
+    check("question still pending", agent.state.needed, "reminder_time")
+    check("lookup gets knowledge", "Corner Cup" in agent._knowledge_lines("What time does the cafe close on Saturdays?"), True)
+
+    # 12. The cafe hours in the reply prompt's example are the knowledge base's, word for word.
+    cafe_line = next(line for line in agent.knowledge_base.all_lines() if line.startswith("Corner Cup"))
+    check("example uses the real cafe line", any(cafe_line in turn for turn, _ in brain.EXAMPLE_TURNS), True)
+
+    # 13. An alternative offered at another hour carries its size, so the reply cannot guess it.
+    state = DialogueState(knowledge_base.load(knowledge_base.DEFAULT_PATH))
+    state.apply_actions([{"type": "book_room", "people": 8, "features": ["projector"], "day": "friday"}])
+    state.apply_actions([{"type": "book_room", "time": "13:00"}])
+    state.apply_actions([{"type": "book_room", "people": 12}])
+    check("alternative carries capacity", "Maple Hall (holds 20" in " ".join(state.fact_lines()), True)
+
     # 8. Only 24-hour times are rewritten for speech; a 12-hour time the model wrote is kept.
     check("24-hour time spoken", brain.spoken_numbers("free on thursday at 15:00."), "free on thursday at 3 PM.")
     check("opening hours range", brain.spoken_numbers("sunday 10:00-16:00"), "sunday 10 AM to 4 PM")

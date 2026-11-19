@@ -34,8 +34,10 @@ development machine and the graded H100 node are not the same computer.
 from __future__ import annotations
 
 import os
+import queue
 import re
 import sys
+import threading
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Iterator
@@ -99,8 +101,11 @@ EXAMPLE_TURNS = (
         "Ten minutes for the tea, starting now.",
     ),
     (
-        "NOTES:\nnone\n\nKNOWLEDGE:\nCorner Cup cafe: floor 1. Open Monday to Friday 08:00-17:00, "
-        "Saturday 09:00-14:00, closed Sunday.\n\nThe user just said: \"Is there a swimming pool?\"",
+        # The knowledge line is the real one from toy_kb, word for word: an example with other
+        # opening hours would teach the model hours the venue does not have.
+        "NOTES:\nnone\n\nKNOWLEDGE:\nCorner Cup cafe (floor 1): Corner Cup serves coffee and snacks on "
+        "weekdays from 07:30 to 15:00 and on Saturdays from 08:30 to 14:00. It is closed on Sundays."
+        "\n\nThe user just said: \"Is there a swimming pool?\"",
         "I don't have anything about a pool. I can tell you about the Corner Cup cafe, though.",
     ),
     (
@@ -370,6 +375,56 @@ def strip_leaked_prompt(sentence: str) -> tuple[str, bool]:
     return clean_for_speech(sentence[: match.start()]).rstrip(" ,;:-"), True
 
 
+class _StreamReader:
+    """Reads one streamed answer on its own thread, so every delta is timed when it arrives.
+
+    The turn loop pulls the next sentence only after it has synthesised the one before, so a reader
+    that waits for the loop leaves the rest of the answer sitting in the socket, and the time the
+    answer was complete came out as the time the last sentence finished synthesising (it was
+    llm_complete, and with it the llm_remaining stage, that grew). Here the stream is drained as
+    the server sends it, and each delta carries the shim-clock time it arrived.
+    """
+
+    def __init__(self, client: "llm_client.ChatClient", messages: list[dict], options: dict) -> None:
+        self.stop = threading.Event()
+        self.items: queue.Queue = queue.Queue()
+        self.thread = threading.Thread(target=self._run, args=(client, messages, options), daemon=True)
+        self.thread.start()
+
+    def _run(self, client: "llm_client.ChatClient", messages: list[dict], options: dict) -> None:
+        try:
+            for delta in client.stream_chat(messages, **options):
+                if self.stop.is_set():
+                    break
+
+                self.items.put((delta, now_nanoseconds()))
+
+        except Exception as error:  # re-raised in the turn by deltas()
+            self.items.put((error, now_nanoseconds()))
+
+        finally:
+            self.items.put((None, now_nanoseconds()))
+
+    def deltas(self) -> Iterator[tuple["llm_client.Delta", int]]:
+        """Yield (delta, arrival time); the stream's end is returned as its arrival time."""
+        while True:
+            item, arrived = self.items.get()
+
+            if item is None:
+                self.ended = arrived
+                return
+
+            if isinstance(item, Exception):
+                raise item
+
+            yield item, arrived
+
+    def close(self) -> None:
+        """Stop reading (the connection is dropped at the next delta) and wait for the thread."""
+        self.stop.set()
+        self.thread.join(timeout=10)
+
+
 class LlmBrain:
     """Holds the dialogue state and asks a locally served chat model what to say next."""
 
@@ -407,6 +462,10 @@ class LlmBrain:
         # When the first token of the ANSWER arrived from the server, on the shim's clock. The
         # README defines llm_first_token as exactly this; the turn loop stamps the event with it.
         self.first_answer_token_nanoseconds: int | None = None
+
+        # When the answer was complete: the end of the stream, or the delta that completed the last
+        # sentence spoken when the reply was cut short. The turn loop stamps llm_complete with it.
+        self.answer_complete_nanoseconds: int | None = None
 
         # Set by tools/try_brain.py to see the prompt of each turn. It is called from inside
         # reply(), AFTER the state has been updated and before the request goes out, because the
@@ -453,6 +512,7 @@ class LlmBrain:
         transcript = (text or "").strip()
         self.first_reasoning_token_nanoseconds = None
         self.first_answer_token_nanoseconds = None
+        self.answer_complete_nanoseconds = None
 
         # The utterance is read and applied BEFORE the reply is generated, so the prompt can state
         # what is now true rather than ask the model to work it out.
@@ -467,30 +527,41 @@ class LlmBrain:
         spoken: list[str] = []
 
         leaked = False
+        reader = _StreamReader(self.client, messages, self._options())
+        arrived = None
 
-        for delta in self.client.stream_chat(messages, **self._options()):
-            if delta.is_reasoning:
-                if self.first_reasoning_token_nanoseconds is None:
-                    self.first_reasoning_token_nanoseconds = now_nanoseconds()
+        try:
+            for delta, arrived in reader.deltas():
+                if delta.is_reasoning:
+                    if self.first_reasoning_token_nanoseconds is None:
+                        self.first_reasoning_token_nanoseconds = arrived
 
-                continue
+                    continue
 
-            if self.first_answer_token_nanoseconds is None and delta.text.strip():
-                self.first_answer_token_nanoseconds = now_nanoseconds()
+                if self.first_answer_token_nanoseconds is None and delta.text.strip():
+                    self.first_answer_token_nanoseconds = arrived
 
-            for sentence in splitter.feed(delta.text):
-                sentence, leaked = strip_leaked_prompt(sentence)
+                for sentence in splitter.feed(delta.text):
+                    sentence, leaked = strip_leaked_prompt(sentence)
 
-                if sentence:
-                    spoken.append(sentence)
+                    if sentence:
+                        spoken.append(sentence)
 
-                    yield sentence
+                        yield sentence
+
+                    if leaked or len(spoken) >= self.settings.max_sentences:
+                        break
 
                 if leaked or len(spoken) >= self.settings.max_sentences:
+                    # Cut short: the answer that is spoken was complete when this delta arrived.
+                    self.answer_complete_nanoseconds = arrived
                     break
 
-            if leaked or len(spoken) >= self.settings.max_sentences:
-                break
+            else:
+                self.answer_complete_nanoseconds = getattr(reader, "ended", arrived)
+
+        finally:
+            reader.close()
 
         last = None if leaked or len(spoken) >= self.settings.max_sentences else splitter.flush()
 
@@ -611,7 +682,11 @@ class LlmBrain:
         # A turn the dialogue state acted on (a timer, a reminder, a booking step) is answered
         # from the NOTES alone. Sending "nothing in the knowledge base is about this" there made
         # the model answer "I don't have that information" to a reminder it had just updated.
-        if self.settings.kb_mode != "full" and (self.state.notes or self.state.needed):
+        # A question still pending from an earlier turn ("what time is the reminder for?") does not
+        # count: a lookup asked meanwhile still needs its knowledge, and got none before.
+        acted = self.state.notes or (self.state.needed and not self.state.needed_carried)
+
+        if self.settings.kb_mode != "full" and acted:
             return NOT_NEEDED
 
         if self.settings.kb_mode == "none":

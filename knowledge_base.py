@@ -330,7 +330,10 @@ class KnowledgeBase:
             return (
                 f"Nothing is free at that hour on {day}. Free then: "
                 + "; ".join(
-                    f"{room['name']} at {', '.join(room['free_hour_starts'][day])}"
+                    # The room's size and equipment are given too: with the name alone the model
+                    # guessed Maple Hall "holds only 10" (it holds 20; job 7174252).
+                    f"{room['name']} (holds {room['capacity']}, has {', '.join(room['features'])}) "
+                    f"at {', '.join(room['free_hour_starts'][day])}"
                     for room in free_that_day[:3]
                 )
                 + "."
