@@ -41,22 +41,19 @@ from voice_kit import (  # noqa: E402
     summarize_time_to_first_audio,
 )
 
-# Stages on the TTFA path, in time order, with their label and fill colour.
+# Stages on the TTFA path, in time order: key, row name, event span, fill colour.
 TTFA_PATH_STAGES = (
-    ("asr", "ASR: end_of_user_speech → asr_final", "#2a78d6"),
-    ("llm_start", "LLM start: asr_final → llm_first_token", "#eb6834"),
-    ("speech_start", "Speech start: llm_first_token → tts_first_audio\n(rest of first sentence + its synthesis)", "#1baf7a"),
+    ("asr", "ASR", "end_of_user_speech → asr_final", "#2a78d6"),
+    ("llm_start", "LLM start", "asr_final → llm_first_token", "#eb6834"),
+    ("speech_start", "Speech start", "llm_first_token → tts_first_audio", "#1baf7a"),
 )
-OFF_PATH_STAGE = ("llm_remaining", "Not on TTFA path: llm_first_token → llm_complete\n(overlaps speech start)")
+OFF_PATH_STAGE = ("llm_remaining", "LLM rest (overlaps)", "llm_first_token → llm_complete")
 OFF_PATH_COLOUR = "#898781"
+TTFA_COLOUR = "#3d3c38"
 TEXT_PRIMARY = "#1f1f1e"
-TEXT_SECONDARY = "#55544e"
+TEXT_SECONDARY = "#6b6a64"
 GRID = "#e4e3dd"
 BUDGET_MILLISECONDS = 1500.0
-
-# Segments narrower than this many milliseconds get their label outside the bar.
-MIN_INLINE_LABEL_MILLISECONDS = 70.0
-
 
 def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
     """Return the settings of one plot."""
@@ -94,102 +91,86 @@ def waterfall_numbers(records: list[dict]) -> dict:
 
 
 def draw(numbers: dict, output: Path, title: str | None) -> None:
-    """Draw the two stacked bars and write the figure."""
-    rows = (("p50", "p50_milliseconds", numbers["ttfa_p50"]), ("p95", "p95_milliseconds", numbers["ttfa_p95"]))
+    """Draw one waterfall panel per percentile (p50 on top, p95 below) and write the figure.
 
-    figure, axes = plt.subplots(figsize=(10, 3.6), dpi=200)
-    bar_height = 0.42
-    off_path_height = 0.12
+    Each panel has one row per stage, named on the left. A stage's bar starts where the previous
+    stage's bar ends, so the TTFA-path bars step down and to the right like a waterfall; the last
+    row is the measured TTFA percentile from 0. The LLM's remaining generation is hatched and
+    starts at llm_first_token, so its overlap with speech start is visible.
+    """
+    rows = [(name, span) for _, name, span, _ in TTFA_PATH_STAGES]
+    rows.append((OFF_PATH_STAGE[1], OFF_PATH_STAGE[2]))
+    rows.append(("TTFA (measured)", "end_of_user_speech → tts_first_audio"))
+
+    panels = (("p50", "p50_milliseconds", numbers["ttfa_p50"]),
+              ("p95", "p95_milliseconds", numbers["ttfa_p95"]))
+
     longest = 0.0
+    for _, key, measured in panels:
+        steps = sum(numbers["stages"][stage][key] for stage, *_ in TTFA_PATH_STAGES)
+        start_remaining = numbers["stages"]["asr"][key] + numbers["stages"]["llm_start"][key]
+        longest = max(longest, steps, measured, start_remaining + numbers["stages"]["llm_remaining"][key])
+    x_max = max(longest * 1.15, 300.0)
 
-    for row_index, (row_name, key, measured_ttfa) in enumerate(rows):
-        y = len(rows) - 1 - row_index
+    figure, all_axes = plt.subplots(2, 1, figsize=(8.5, 6.4), dpi=200, sharex=True)
+    bar_height = 0.62
+
+    for axes, (panel_name, key, measured) in zip(all_axes, panels):
         left = 0.0
-
-        for stage, label, colour in TTFA_PATH_STAGES:
+        for row, (stage, _, _, colour) in enumerate(TTFA_PATH_STAGES):
             width = numbers["stages"][stage][key]
-            axes.barh(
-                y,
-                width,
-                left=left,
-                height=bar_height,
-                color=colour,
-                edgecolor="white",
-                linewidth=2,
-                label=label if row_index == 0 else None,
-            )
-
-            text = f"{width:.0f}"
-            if width >= MIN_INLINE_LABEL_MILLISECONDS:
-                axes.text(left + width / 2, y, text, ha="center", va="center", color="white",
-                          fontsize=9, fontweight="bold")
-            else:
-                axes.text(left + width / 2, y + bar_height / 2 + 0.04, text, ha="center",
-                          va="bottom", color=TEXT_PRIMARY, fontsize=8)
+            axes.barh(row, width, left=left, height=bar_height, color=colour)
+            axes.text(left + width + 6, row, f"{width:.1f} ms", ha="left", va="center",
+                      color=TEXT_PRIMARY, fontsize=9, fontweight="bold")
+            if row:
+                axes.plot([left, left], [row - 1 + bar_height / 2, row - bar_height / 2],
+                          color=TEXT_SECONDARY, linewidth=0.8, linestyle=":")
             left += width
 
-        llm_start_end = numbers["stages"]["asr"][key] + numbers["stages"]["llm_start"][key]
-        remaining = numbers["stages"][OFF_PATH_STAGE[0]][key]
-        off_y = y - bar_height / 2 - off_path_height / 2 - 0.04
-        axes.barh(
-            off_y,
-            remaining,
-            left=llm_start_end,
-            height=off_path_height,
-            color="white",
-            edgecolor=OFF_PATH_COLOUR,
-            hatch="////",
-            linewidth=0.8,
-            label=OFF_PATH_STAGE[1] if row_index == 0 else None,
-        )
-        axes.text(llm_start_end + remaining + 8, off_y, f"{remaining:.0f}", ha="left", va="center",
-                  color=TEXT_SECONDARY, fontsize=7.5)
+        remaining_row = len(TTFA_PATH_STAGES)
+        remaining_start = numbers["stages"]["asr"][key] + numbers["stages"]["llm_start"][key]
+        remaining = numbers["stages"]["llm_remaining"][key]
+        axes.barh(remaining_row, remaining, left=remaining_start, height=bar_height * 0.7,
+                  color="white", edgecolor=OFF_PATH_COLOUR, hatch="////", linewidth=0.8)
+        axes.text(remaining_start + remaining + 6, remaining_row, f"{remaining:.1f} ms  (not on TTFA path)",
+                  ha="left", va="center", color=TEXT_SECONDARY, fontsize=8.5)
 
-        axes.plot([measured_ttfa, measured_ttfa], [y - bar_height / 2 - 0.02, y + bar_height / 2 + 0.02],
-                  color="black", linewidth=2)
-        axes.text(max(left, measured_ttfa) + 12, y + 0.06,
-                  f"measured TTFA {row_name} = {measured_ttfa:.0f} ms", ha="left", va="center",
-                  color=TEXT_PRIMARY, fontsize=9, fontweight="bold")
-        axes.text(max(left, measured_ttfa) + 12, y - 0.12,
-                  f"(sum of stage {row_name}s = {left:.0f} ms)", ha="left", va="center",
-                  color=TEXT_SECONDARY, fontsize=7.5)
+        ttfa_row = remaining_row + 1
+        axes.barh(ttfa_row, measured, left=0, height=bar_height, color=TTFA_COLOUR)
+        axes.text(measured + 6, ttfa_row, f"{measured:.1f} ms", ha="left", va="center",
+                  color=TEXT_PRIMARY, fontsize=9.5, fontweight="bold")
+        axes.text(measured + 6, ttfa_row + 0.42, f"(sum of the stage {panel_name}s above: {left:.1f} ms)",
+                  ha="left", va="center", color=TEXT_SECONDARY, fontsize=7.5)
+        axes.axvline(measured, color=TTFA_COLOUR, linewidth=0.8, linestyle="--", alpha=0.6)
 
-        longest = max(longest, left, measured_ttfa, llm_start_end + remaining)
+        axes.set_yticks(range(len(rows)))
+        axes.set_yticklabels([f"{name}\n{span}" for name, span in rows], fontsize=8.5)
+        for label in axes.get_yticklabels()[:len(TTFA_PATH_STAGES)]:
+            label.set_color(TEXT_PRIMARY)
+        axes.invert_yaxis()
+        axes.set_xlim(0, x_max)
+        axes.grid(axis="x", color=GRID, linewidth=0.8)
+        axes.set_axisbelow(True)
+        for side in ("top", "right", "left"):
+            axes.spines[side].set_visible(False)
+        axes.tick_params(axis="y", length=0)
+        axes.set_title(f"{panel_name} of each stage", loc="left", fontsize=10.5,
+                       color=TEXT_PRIMARY, fontweight="bold")
 
-    # The x range follows the data, so a fast run is not squeezed into the left edge. The 1500 ms
-    # target is drawn only when it falls inside that range.
-    x_max = max(longest * 1.75, 300.0)
+        if BUDGET_MILLISECONDS <= x_max:
+            axes.axvline(BUDGET_MILLISECONDS, color=TEXT_SECONDARY, linestyle="--", linewidth=1)
 
-    if BUDGET_MILLISECONDS <= x_max:
-        axes.axvline(BUDGET_MILLISECONDS, color=TEXT_SECONDARY, linestyle="--", linewidth=1)
-        axes.text(BUDGET_MILLISECONDS, len(rows) - 0.45, "1500 ms target (p50)", ha="center",
-                  va="bottom", color=TEXT_SECONDARY, fontsize=8)
-
-    axes.set_yticks(range(len(rows)))
-    axes.set_yticklabels([name for name, _, _ in reversed(rows)], fontsize=10)
-    axes.set_xlabel("milliseconds after end of user speech", color=TEXT_SECONDARY)
-    axes.set_xlim(0, x_max)
-    axes.set_ylim(-0.75, len(rows) - 0.2)
-    axes.grid(axis="x", color=GRID, linewidth=0.8)
-    axes.set_axisbelow(True)
-
-    for side in ("top", "right", "left"):
-        axes.spines[side].set_visible(False)
-    axes.tick_params(axis="y", length=0)
-
-    axes.set_title(
+    all_axes[-1].set_xlabel("milliseconds after end of user speech", color=TEXT_SECONDARY)
+    figure.suptitle(
         title
-        or f"Latency waterfall, {numbers['turn_count']} passing turns "
+        or f"Latency waterfall: {numbers['turn_count']} passing turns "
         f"({numbers['rejected_count']} rejected)",
-        loc="left",
-        fontsize=11,
-        color=TEXT_PRIMARY,
+        x=0.01, ha="left", fontsize=12, color=TEXT_PRIMARY,
     )
-    axes.legend(loc="upper center", bbox_to_anchor=(0.5, -0.28), ncol=2, frameon=False, fontsize=8)
 
     figure.tight_layout()
     output.parent.mkdir(parents=True, exist_ok=True)
-    figure.savefig(output, bbox_inches="tight")
+    figure.savefig(output, bbox_inches="tight", facecolor="white")
     plt.close(figure)
 
 
