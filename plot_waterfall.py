@@ -132,7 +132,7 @@ def draw(numbers: dict, output: Path, title: str | None) -> None:
         remaining = numbers["stages"]["llm_remaining"][key]
         axes.barh(remaining_row, remaining, left=remaining_start, height=bar_height * 0.7,
                   color="white", edgecolor=OFF_PATH_COLOUR, hatch="////", linewidth=0.8)
-        axes.text(remaining_start + remaining + 6, remaining_row, f"{remaining:.1f} ms  (not on TTFA path)",
+        axes.text(remaining_start + remaining + 6, remaining_row, f"{remaining:.1f} ms",
                   ha="left", va="center", color=TEXT_SECONDARY, fontsize=8.5)
 
         ttfa_row = remaining_row + 1
