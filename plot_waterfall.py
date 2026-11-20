@@ -57,17 +57,17 @@ TTFA_PATH_STAGES = (
     ("llm_start", "LLM start", "asr_final → llm_first_token", "#eb6834"),
     ("speech_start", "Speech start", "llm_first_token → tts_first_audio", "#1baf7a"),
 )
-OFF_PATH_STAGE = ("llm_remaining", "LLM rest (overlaps)", "llm_first_token → llm_complete")
+OFF_PATH_STAGE = ("llm_remaining", "LLM reply rest (overlaps)", "llm_first_token → llm_complete")
 OFF_PATH_COLOUR = "#898781"
 
 # The parts of the LLM start stage: key, row name, (start, end) time, colour. A time is an event
 # name or an extras key; the parts are back to back from asr_final to llm_first_token.
 LLM_START_PARTS = (
-    ("intent_wait", "↳ intent call: request + prefill", ("asr_final", "intent_first_reasoning_nanoseconds"), "#f6b08e"),
-    ("intent_reasoning", "↳ intent call: reasoning", ("intent_first_reasoning_nanoseconds", "intent_first_json_nanoseconds"), "#d9541a"),
-    ("intent_json", "↳ intent call: JSON", ("intent_first_json_nanoseconds", "intent_done_nanoseconds"), "#f29061"),
-    ("act_and_prefill", "↳ actions run + reply prefill", ("intent_done_nanoseconds", "first_reasoning_token_nanoseconds"), "#f6b08e"),
-    ("reply_reasoning", "↳ reply: reasoning", ("first_reasoning_token_nanoseconds", "llm_first_token"), "#d9541a"),
+    ("intent_wait", "intent call: request + prefill", ("asr_final", "intent_first_reasoning_nanoseconds"), "#f6b08e"),
+    ("intent_reasoning", "intent call: reasoning", ("intent_first_reasoning_nanoseconds", "intent_first_json_nanoseconds"), "#d9541a"),
+    ("intent_json", "intent call: JSON", ("intent_first_json_nanoseconds", "intent_done_nanoseconds"), "#f29061"),
+    ("act_and_prefill", "actions run + reply prefill", ("intent_done_nanoseconds", "first_reasoning_token_nanoseconds"), "#f6b08e"),
+    ("reply_reasoning", "reply: reasoning", ("first_reasoning_token_nanoseconds", "llm_first_token"), "#d9541a"),
 )
 TTFA_COLOUR = "#3d3c38"
 TEXT_PRIMARY = "#1f1f1e"
@@ -213,14 +213,24 @@ def draw(numbers: dict, output: Path, title: str | None) -> None:
                   color=TEXT_PRIMARY, fontsize=9.5, fontweight="bold")
         axes.axvline(measured, color=TTFA_COLOUR, linewidth=0.8, linestyle="--", alpha=0.6)
 
+        # Row names drawn by hand: a stage's name in bold with its event span under it in plain
+        # text, and the parts of LLM start in small grey type.
         axes.set_yticks(range(len(rows)))
-        axes.set_yticklabels([f"{name}\n{span}" for name, span in rows], fontsize=8.5)
-        for index, label in enumerate(axes.get_yticklabels()):
-            if index in path_rows:
-                label.set_color(TEXT_PRIMARY)
-            elif 1 < index < path_rows[-1]:
-                label.set_color(TEXT_SECONDARY)
-                label.set_fontsize(8)
+        axes.set_yticklabels([""] * len(rows))
+        label_axis = axes.get_yaxis_transform()
+
+        for index, (name, span) in enumerate(rows):
+            is_part = 1 < index < path_rows[-1]
+
+            if is_part:
+                axes.text(-0.015, index, name, transform=label_axis, ha="right", va="center",
+                          fontsize=8, color=TEXT_SECONDARY)
+                continue
+
+            axes.text(-0.015, index - 0.13, name, transform=label_axis, ha="right", va="center",
+                      fontsize=9, fontweight="bold", color=TEXT_PRIMARY)
+            axes.text(-0.015, index + 0.2, span, transform=label_axis, ha="right", va="center",
+                      fontsize=7.5, color=TEXT_SECONDARY)
         axes.invert_yaxis()
         axes.set_xlim(0, x_max)
         axes.grid(axis="x", color=GRID, linewidth=0.8)
