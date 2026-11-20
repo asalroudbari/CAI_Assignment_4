@@ -57,7 +57,7 @@ TTFA_PATH_STAGES = (
     ("llm_start", "LLM start", "asr_final → llm_first_token", "#eb6834"),
     ("speech_start", "Speech start", "llm_first_token → tts_first_audio", "#1baf7a"),
 )
-OFF_PATH_STAGE = ("llm_remaining", "LLM reply rest (overlaps)", "llm_first_token → llm_complete")
+OFF_PATH_STAGE = ("llm_remaining", "LLM reply start", "llm_first_token → llm_complete")
 OFF_PATH_COLOUR = "#898781"
 
 # The parts of the LLM start stage: key, row name, (start, end) time, colour. A time is an event
