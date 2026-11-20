@@ -761,6 +761,11 @@ def run_turn(
             turn.extras["intent_milliseconds"] = round(intent_milliseconds, 1)
             turn.extras["intent_actions"] = getattr(dialogue_manager, "intent_actions", None)
 
+        # Times inside the LLM start stage (shim clock, nanoseconds), so the waterfall can split it.
+        for name, value in (getattr(dialogue_manager, "llm_start_times", None) or {}).items():
+            if value is not None:
+                turn.extras[f"{name}_nanoseconds"] = value
+
     finally:
         # In a finally block on purpose: a turn that failed still has to write its record, so the
         # checker can reject it and we can see which turn it was.

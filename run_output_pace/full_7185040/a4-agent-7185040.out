@@ -1,0 +1,334 @@
+---------------------------------------
+Begin Slurm Prolog: Nov-19-2026 22:52:41
+Job ID:    7185040
+User ID:   jju35
+Account:   ece
+Job name:  a4-agent
+Partition: ice-gpu
+QOS:       coe-ice
+---------------------------------------
+node: atl1-1-03-012-23-0.pace.gatech.edu  model: openai/gpt-oss-20b  cpus: 8
+recordings: recordings  output: run_output/7185040  image: /home/hice1/jju35/scratch/a4/agent.sif
+GPU 0: NVIDIA H100 80GB HBM3 (UUID: GPU-1443da1f-371f-996f-6b6f-9fe600d92477)
+vllm 0.14.0
+LLM server ready on port 25040
+==============================================================================
+recordings        72 from /work/recordings
+output            /work/run_output/7185040
+tts sample rate   22050 Hz
+cpu count         8 from --cpu-count
+OMP_NUM_THREADS   8 -> 8
+MKL_NUM_THREADS   (unset) -> 8
+asr               FasterWhisperAsr (real)
+brain             LlmBrain (real)
+tts               PiperTts (real)
+asr settings      Systran/faster-whisper-small.en device=cuda compute_type=float16 cpu_threads=8 num_workers=1 beam_size=1 warmup_decodes=2 vad_filter=False condition_on_previous_text=False
+brain settings    openai/gpt-oss-20b at http://127.0.0.1:25040/v1 temperature=0.0 max_tokens=512 kb_mode=relevant kb_facts=4 history_turns=6 nlu=llm reasoning_effort=low
+tts settings      /storage/ice1/0/4/lheck6/CS6604_ECE6256/hf_cache/hub/models--rhasspy--piper-voices/snapshots/cf910fb59f1d79ab3b625a63993a108751c6c25d/en/en_US/lessac/medium/en_US-lessac-medium.onnx device=cpu cpu_threads=8 chunk_milliseconds=0 trim_leading_silence=False
+==============================================================================
+warming up ...
+  asr    warmed up in   6350.7 ms
+  brain  warmed up in   2424.9 ms
+  tts    warmed up in   1112.3 ms
+warm up finished in 9888.0 ms
+
+--- dialogue 01 ---
+turn_0001  asr     49.9 ms | llm_start    226.7 ms | speech_start     82.0 ms | ttfa    358.5 ms
+             transcript: Set a timer for five minutes for the pasta.
+             reply:      Five minutes for the pasta, starting now.
+turn_0002  asr     29.0 ms | llm_start    395.6 ms | speech_start     78.0 ms | ttfa    502.7 ms
+             transcript: Also started 20 minute phone for the laundry.
+             reply:      Twenty minutes for the phone, starting now.
+turn_0003  asr     33.6 ms | llm_start    312.9 ms | speech_start     69.9 ms | ttfa    416.4 ms
+             transcript: How much is left on the pesto?
+             reply:      I don't have that information. I can tell you h…
+--- dialogue 02 ---
+turn_0004  asr     41.4 ms | llm_start    305.8 ms | speech_start     71.1 ms | ttfa    418.4 ms
+             transcript: Remind me to study for the CIA course 230 today.
+             reply:      What time would you like the reminder?
+turn_0005  asr     41.4 ms | llm_start    505.1 ms | speech_start     71.6 ms | ttfa    618.0 ms
+             transcript: I actually can't sell that I have a model cours…
+             reply:      What time would you like the reminder?
+--- dialogue 03 ---
+turn_0006  asr     34.6 ms | llm_start    273.8 ms | speech_start     59.8 ms | ttfa    368.2 ms
+             transcript: Put the timer for me.
+             reply:      How long should the timer run?
+turn_0007  asr     20.2 ms | llm_start    371.6 ms | speech_start     94.9 ms | ttfa    486.7 ms
+             transcript: Half an hour.
+             reply:      Half an hour timer started, 30 minutes left.
+turn_0008  asr     31.9 ms | llm_start    265.9 ms | speech_start    152.4 ms | ttfa    450.1 ms
+             transcript: Add 10 more minutes to that.
+             reply:      Added 10 minutes to the timer, now 39 minutes 5…
+--- dialogue 04 ---
+turn_0009  asr     52.9 ms | llm_start    239.3 ms | speech_start     68.4 ms | ttfa    360.6 ms
+             transcript: Remind me on 18th of November that I have a qua…
+             reply:      What time would you like the reminder?
+turn_0010  asr     57.7 ms | llm_start    258.2 ms | speech_start     70.3 ms | ttfa    386.2 ms
+             transcript: And another reminder that I have a deadline for…
+             reply:      What time would you like the reminder?
+turn_0011  asr     64.2 ms | llm_start    602.4 ms | speech_start    132.1 ms | ttfa    798.7 ms
+             transcript: Actually, the deadline for the homework is on t…
+             reply:      I set the reminder for the homework deadline to…
+turn_0012  asr     32.9 ms | llm_start    356.9 ms | speech_start    231.6 ms | ttfa    621.5 ms
+             transcript: Read my reminders back to me.
+             reply:      You have a reminder for a qualification exam, a…
+--- dialogue 05 ---
+turn_0013  asr     37.6 ms | llm_start    309.9 ms | speech_start     81.8 ms | ttfa    429.3 ms
+             transcript: Where is the quiet lounge and how can I access …
+             reply:      The quiet lounge is on the second floor. Phone …
+turn_0014  asr     44.2 ms | llm_start    392.1 ms | speech_start    102.6 ms | ttfa    538.9 ms
+             transcript: Can I have my group meeting in the quiet lounge?
+             reply:      I don’t have availability for the quiet lounge.…
+--- dialogue 06 ---
+turn_0015  asr     52.9 ms | llm_start    259.4 ms | speech_start    175.1 ms | ttfa    487.4 ms
+             transcript: How much is a day locker and do I need to bring…
+             reply:      A day locker costs 2 dollars and comes with a l…
+turn_0016  asr     37.3 ms | llm_start    231.5 ms | speech_start     89.6 ms | ttfa    358.4 ms
+             transcript: How much does it cost to laminate one page?
+             reply:      It costs 1 dollar to laminate one page.
+turn_0017  asr     36.7 ms | llm_start    306.1 ms | speech_start    148.5 ms | ttfa    491.3 ms
+             transcript: How far ahead can I book a room and for how lon…
+             reply:      You can book a room up to seven days ahead, and…
+--- dialogue 07 ---
+turn_0018  asr     28.5 ms | llm_start    295.2 ms | speech_start    101.6 ms | ttfa    425.4 ms
+             transcript: What are the working hours on Sunday?
+             reply:      Sunday hours are from 10 AM to 4 PM.
+turn_0019  asr     43.0 ms | llm_start    277.7 ms | speech_start     95.4 ms | ttfa    416.1 ms
+             transcript: Can I have my coffee at the cafe on Sunday?
+             reply:      The Corner Cup cafe is closed on Sundays. The c…
+--- dialogue 08 ---
+turn_0020  asr     61.9 ms | llm_start    241.8 ms | speech_start    227.3 ms | ttfa    530.9 ms
+             transcript: It's 10 p.m. on a Sunday and I'm at the front d…
+             reply:      The front desk is only open from 10 AM to 4 PM …
+turn_0021  asr     40.3 ms | llm_start    261.6 ms | speech_start     70.2 ms | ttfa    372.2 ms
+             transcript: I wanted to ask about parking information. Wher…
+             reply:      I don't have that information. I can tell you a…
+--- dialogue 09 ---
+turn_0022  asr     59.4 ms | llm_start    288.1 ms | speech_start    107.4 ms | ttfa    454.8 ms
+             transcript: I want to go to the laptop center and loan a la…
+             reply:      You can borrow a laptop for up to 4 hours. If y…
+turn_0023  asr     53.1 ms | llm_start    288.3 ms | speech_start    165.5 ms | ttfa    506.8 ms
+             transcript: Can I leave my child here at the cafe? She's 10…
+             reply:      Children under 12 must stay with an adult, so y…
+--- dialogue 10 ---
+turn_0024  asr     58.9 ms | llm_start    199.7 ms | speech_start    284.8 ms | ttfa    543.5 ms
+             transcript: I need a room with a whiteboard in it. Which ro…
+             reply:      Birch Room on the first floor, Pine Room on the…
+turn_0025  asr     44.9 ms | llm_start    232.3 ms | speech_start    101.0 ms | ttfa    378.2 ms
+             transcript: I also need a projector. What are my options no…
+             reply:      Cedar Room on the first floor has a projector. …
+turn_0026  asr     28.5 ms | llm_start    375.6 ms | speech_start    149.2 ms | ttfa    553.3 ms
+             transcript: Can I put it for a Saturday meeting?
+             reply:      I don’t have a room with a projector and whiteb…
+--- dialogue 11 ---
+turn_0027  asr     39.5 ms | llm_start    264.5 ms | speech_start     74.3 ms | ttfa    378.2 ms
+             transcript: I'd like to book your room on Monday morning.
+             reply:      How many people will be in the room?
+turn_0028  asr     33.8 ms | llm_start    575.7 ms | speech_start    213.6 ms | ttfa    823.1 ms
+             transcript: 4 of us and we need the screen to watch a video
+             reply:      Birch Room on the first floor is free on Monday…
+turn_0029  asr     27.0 ms | llm_start   1157.6 ms | speech_start     78.1 ms | ttfa   1262.6 ms
+             transcript: channel clock under the name Ravey
+             reply:      What time would you like the reminder set?
+turn_0030  asr     27.8 ms | llm_start    622.0 ms | speech_start     78.3 ms | ttfa    728.1 ms
+             transcript: Yes, please.
+             reply:      What name would you like to book it under?
+--- dialogue 12 ---
+turn_0031  asr     37.4 ms | llm_start    263.8 ms | speech_start    194.7 ms | ttfa    495.8 ms
+             transcript: Can I get a room with a projector for eight peo…
+             reply:      Cedar Room on the first floor is free on Friday…
+turn_0032  asr     25.6 ms | llm_start    567.7 ms | speech_start    193.4 ms | ttfa    786.7 ms
+             transcript: One in the afternoon works.
+             reply:      Cedar Room on the first floor is free on Friday…
+turn_0033  asr     48.7 ms | llm_start    188.0 ms | speech_start    169.6 ms | ttfa    406.3 ms
+             transcript: Hang on, there'll be 12 of us now, not 8.
+             reply:      I don’t have a room for 12 people with a projec…
+turn_0034  asr     43.5 ms | llm_start    619.2 ms | speech_start    198.1 ms | ttfa    860.7 ms
+             transcript: 5 p.m. under the name Asa.
+             reply:      Maple Hall on the third floor is free on Friday…
+--- dialogue 13 ---
+turn_0035  asr     42.6 ms | llm_start    357.0 ms | speech_start    125.5 ms | ttfa    525.0 ms
+             transcript: Is there room 410 with the projector on a Sunda…
+             reply:      I don’t have a room with a projector on a Sunda…
+turn_0036  asr     29.2 ms | llm_start    413.6 ms | speech_start    183.6 ms | ttfa    626.4 ms
+             transcript: Saturday at 11 then for Mariel.
+             reply:      Fir Studio on the second floor is free on Satur…
+--- dialogue 21 ---
+turn_0037  asr     33.8 ms | llm_start    202.3 ms | speech_start     79.8 ms | ttfa    315.9 ms
+             transcript: Let a timer for 5 minutes for the pasta.
+             reply:      Five minutes for the pasta, starting now.
+turn_0038  asr     39.0 ms | llm_start    346.3 ms | speech_start     81.2 ms | ttfa    466.4 ms
+             transcript: Also start a 20 minute one for the laundry.
+             reply:      Twenty minutes for the laundry, starting now.
+turn_0039  asr     26.7 ms | llm_start    204.1 ms | speech_start     71.2 ms | ttfa    302.0 ms
+             transcript: How much is left in the pasta?
+             reply:      Four minutes 51 seconds left.
+--- dialogue 22 ---
+turn_0040  asr     33.9 ms | llm_start    278.3 ms | speech_start     71.0 ms | ttfa    383.2 ms
+             transcript: remind me to study for the CAI course 230 today
+             reply:      What time would you like the reminder?
+turn_0041  asr     30.6 ms | llm_start    432.2 ms | speech_start    114.7 ms | ttfa    577.6 ms
+             transcript: Actually, cancel that. I have another core.
+             reply:      Cancelled the reminder "study for the CAI cours…
+--- dialogue 23 ---
+turn_0042  asr     29.7 ms | llm_start    273.6 ms | speech_start     58.8 ms | ttfa    362.1 ms
+             transcript: Put a timer for me.
+             reply:      How long should the timer run?
+turn_0043  asr     19.2 ms | llm_start    347.6 ms | speech_start     94.6 ms | ttfa    461.5 ms
+             transcript: half an hour
+             reply:      Half an hour timer started, 30 minutes left.
+turn_0044  asr     29.1 ms | llm_start    330.1 ms | speech_start    145.2 ms | ttfa    504.4 ms
+             transcript: Add 10 more minutes to that
+             reply:      Added 10 minutes to the timer, now 39 minutes 5…
+--- dialogue 24 ---
+turn_0045  asr     43.1 ms | llm_start    236.3 ms | speech_start     70.7 ms | ttfa    350.2 ms
+             transcript: Remind me on 18th of November that I have a qua…
+             reply:      What time would you like the reminder?
+turn_0046  asr     55.0 ms | llm_start    254.0 ms | speech_start     71.8 ms | ttfa    380.8 ms
+             transcript: Add another reminder that I have a deadline for…
+             reply:      What time would you like the reminder?
+turn_0047  asr     58.4 ms | llm_start    352.7 ms | speech_start    123.2 ms | ttfa    534.2 ms
+             transcript: Actually the deadline for that homework is on t…
+             reply:      Reminder for the CAI course deadline set to 18t…
+turn_0048  asr     38.3 ms | llm_start    358.2 ms | speech_start    218.9 ms | ttfa    615.4 ms
+             transcript: Read my reminders back to me.
+             reply:      You have a reminder for a qualification exam, a…
+--- dialogue 25 ---
+turn_0049  asr     44.7 ms | llm_start    286.3 ms | speech_start     87.9 ms | ttfa    419.0 ms
+             transcript: Where is the quiet lounge and how can I access …
+             reply:      The quiet lounge is on the second floor. It’s f…
+turn_0050  asr     39.0 ms | llm_start    345.2 ms | speech_start    100.0 ms | ttfa    484.2 ms
+             transcript: Can I have my group meeting in the quiet lounge?
+             reply:      I don’t have a booking for the quiet lounge. It…
+--- dialogue 26 ---
+turn_0051  asr     40.0 ms | llm_start    255.4 ms | speech_start    171.7 ms | ttfa    467.1 ms
+             transcript: How much is a day locker and do I need to bring…
+             reply:      A day locker costs 2 dollars and comes with a l…
+turn_0052  asr     32.1 ms | llm_start    229.2 ms | speech_start     94.8 ms | ttfa    356.0 ms
+             transcript: How much does it cost to laminate one page?
+             reply:      It costs 1 dollar to laminate one page.
+turn_0053  asr     39.3 ms | llm_start    301.2 ms | speech_start    146.0 ms | ttfa    486.5 ms
+             transcript: How far ahead can I book a room and for how lon…
+             reply:      You can book a room up to seven days ahead, and…
+--- dialogue 27 ---
+turn_0054  asr     34.3 ms | llm_start    291.7 ms | speech_start    102.3 ms | ttfa    428.3 ms
+             transcript: What are the working hours on Sunday?
+             reply:      Sunday hours are from 10 AM to 4 PM.
+turn_0055  asr     43.1 ms | llm_start    269.3 ms | speech_start     95.6 ms | ttfa    407.9 ms
+             transcript: Can I have my coffee at the cafe on Sunday?
+             reply:      The Corner Cup cafe is closed on Sundays. The c…
+--- dialogue 28 ---
+turn_0056  asr     69.1 ms | llm_start    215.4 ms | speech_start    228.7 ms | ttfa    513.2 ms
+             transcript: It's 10pm on a Sunday and I'm at the front desk…
+             reply:      The front desk is only open from 10 AM to 4 PM …
+turn_0057  asr     50.3 ms | llm_start    261.2 ms | speech_start     70.3 ms | ttfa    381.8 ms
+             transcript: I want to ask about parking information. Where …
+             reply:      I don't have that information. I can tell you a…
+--- dialogue 29 ---
+turn_0058  asr     62.9 ms | llm_start    281.2 ms | speech_start     91.4 ms | ttfa    435.5 ms
+             transcript: I want to go to the laptop center and loan the …
+             reply:      You can borrow a laptop for four hours. If you …
+turn_0059  asr     52.3 ms | llm_start    347.7 ms | speech_start    158.4 ms | ttfa    558.3 ms
+             transcript: Can I leave my child here at the cafe? She's 10…
+             reply:      Children under 12 must stay with an adult, so y…
+--- dialogue 30 ---
+turn_0060  asr     47.9 ms | llm_start    184.7 ms | speech_start    285.5 ms | ttfa    518.1 ms
+             transcript: I need a room with the whiteboard in it. Which …
+             reply:      Birch Room on the first floor, Pine Room on the…
+turn_0061  asr     41.1 ms | llm_start    230.1 ms | speech_start     95.3 ms | ttfa    366.5 ms
+             transcript: I also need a projector. What are my options no…
+             reply:      Cedar Room on the first floor has a projector. …
+turn_0062  asr     28.4 ms | llm_start    369.9 ms | speech_start    149.3 ms | ttfa    547.7 ms
+             transcript: Can I book it for a Saturday meeting?
+             reply:      I don’t have a room with a projector and whiteb…
+--- dialogue 31 ---
+turn_0063  asr     32.0 ms | llm_start    415.2 ms | speech_start     75.1 ms | ttfa    522.3 ms
+             transcript: I'd like to book a room on Monday morning.
+             reply:      How many people will be in the room?
+turn_0064  asr     36.0 ms | llm_start    376.6 ms | speech_start    200.1 ms | ttfa    612.7 ms
+             transcript: Four of us and we need a screen to watch your v…
+             reply:      Birch Room on the first floor is free on Monday…
+turn_0065  asr     41.7 ms | llm_start    386.4 ms | speech_start    195.7 ms | ttfa    623.9 ms
+             transcript: 10 o'clock under the name Ravi
+             reply:      Birch Room on the first floor is free on Monday…
+turn_0066  asr     32.2 ms | llm_start    253.0 ms | speech_start    139.3 ms | ttfa    424.5 ms
+             transcript: Yes, please.
+             reply:      Birch Room on the first floor, Monday at 10 AM,…
+--- dialogue 32 ---
+turn_0067  asr     38.7 ms | llm_start    263.2 ms | speech_start    191.7 ms | ttfa    493.6 ms
+             transcript: Can I get a room with the projector for 8 peopl…
+             reply:      Cedar Room on the first floor is free on Friday…
+turn_0068  asr     22.0 ms | llm_start    312.6 ms | speech_start    195.0 ms | ttfa    529.6 ms
+             transcript: One in the afternoon work
+             reply:      Cedar Room on the first floor is free on Friday…
+turn_0069  asr     36.8 ms | llm_start    320.9 ms | speech_start    169.3 ms | ttfa    527.1 ms
+             transcript: Hang on, there will be 12 of us now, not 8.
+             reply:      I don’t have a room for 12 people with a projec…
+turn_0070  asr     40.6 ms | llm_start    556.8 ms | speech_start    204.9 ms | ttfa    802.3 ms
+             transcript: 5 p.m. under the name as well.
+             reply:      Maple Hall on the third floor is free on Friday…
+--- dialogue 33 ---
+turn_0071  asr     37.1 ms | llm_start    416.9 ms | speech_start    152.9 ms | ttfa    606.9 ms
+             transcript: Is there a room for a tent with the projector o…
+             reply:      I don’t have a room that fits a tent with a pro…
+turn_0072  asr     23.9 ms | llm_start    401.1 ms | speech_start    179.7 ms | ttfa    604.8 ms
+             transcript: Saturday at 11 then for Maria
+             reply:      Fir Studio on the second floor is free on Satur…
+
+trace written to /work/run_output/7185040/trace.jsonl
+captured audio in /work/run_output/7185040/tts
+check it with: PYTHONPATH=. python3 check_trace.py --trace /work/run_output/7185040/trace.jsonl
+
+================ checker ================
+trace: /work/run_output/7185040/trace.jsonl
+
+problems
+--------
+none
+
+summary
+-------
+records in trace   72
+passing            72
+rejected           0
+
+time to first audio (passing turns only)
+----------------------------------------
+turn_count         72
+p50_milliseconds   487.0
+p95_milliseconds   800.3
+
+stages (passing turns only)
+---------------------------
+stage                   p50 ms    p95 ms
+asr                       38.9      60.5
+llm_start                298.2     587.7
+speech_start             105.0     227.9
+llm_remaining             60.1     125.9
+time_to_first_audio      487.0     800.3
+
+feed lag (limit 5.0 ms)
+-----------------------
+worst              8.254 ms on turn_0053
+over limit         turn_0053: 8.254 ms
+FAIL  1 turn(s) at or over 5.0 ms
+
+stage implementations
+---------------------
+  72 turn(s)  {"asr": "FasterWhisperAsr", "brain": "LlmBrain", "tts": "PiperTts"}
+
+verdict
+-------
+FAIL
+---------------------------------------
+Begin Slurm Epilog: Nov-19-2026 23:02:04
+Job ID:        7185040
+User ID:       jju35
+Account:       ece
+Job name:      a4-agent
+Resources:     cpu=8,gres/gpu:h100=1,mem=64G,node=1
+Rsrc Used:     cput=01:15:28,vmem=0,walltime=00:09:26,mem=12213504K,energy_used=0
+Partition:     ice-gpu
+QOS:           coe-ice
+Nodes:         atl1-1-03-012-23-0
+---------------------------------------

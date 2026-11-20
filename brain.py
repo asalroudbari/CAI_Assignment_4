@@ -386,6 +386,7 @@ class _StreamReader:
     """
 
     def __init__(self, client: "llm_client.ChatClient", messages: list[dict], options: dict) -> None:
+        self.requested = now_nanoseconds()  # when the reply request goes out, for the trace
         self.stop = threading.Event()
         self.items: queue.Queue = queue.Queue()
         self.thread = threading.Thread(target=self._run, args=(client, messages, options), daemon=True)
@@ -453,6 +454,10 @@ class LlmBrain:
         # What the intent reader returned this turn and how long it took, for the trace.
         self.intent_actions: list[dict] | None = None
         self.intent_milliseconds: float | None = None
+
+        # Shim-clock times inside the LLM start stage, for the trace: the intent call's request,
+        # first reasoning token, first JSON token and end, and when the reply request went out.
+        self.llm_start_times: dict[str, int | None] = {}
         self.history: list[tuple[str, str]] = []
 
         # Read by the turn loop into extras.first_reasoning_token_nanoseconds, for a model that
@@ -528,6 +533,10 @@ class LlmBrain:
 
         leaked = False
         reader = _StreamReader(self.client, messages, self._options())
+        self.llm_start_times = {
+            **{f"intent_{key}": value for key, value in (getattr(self.intent_reader, "last_times", {}) or {}).items()},
+            "reply_request": reader.requested,
+        } if self.intent_actions is not None else {"reply_request": reader.requested}
         arrived = None
 
         try:

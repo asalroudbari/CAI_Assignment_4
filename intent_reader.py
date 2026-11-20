@@ -19,6 +19,7 @@ import time
 
 import llm_client
 import spoken_text
+from voice_kit import now_nanoseconds
 from dialogue_state import NEEDED_BOOKING_NAME, NEEDED_IN_WORDS, DialogueState
 
 WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
@@ -399,9 +400,13 @@ class IntentReader:
         self.options = {**options, "max_tokens": max_tokens * 4 if reasoning else max_tokens,
                         "temperature": 0.0}
         self.schema = schema(room_names, features)
+        self.response_format = {"type": "json_schema", "json_schema": {"name": "intent", "schema": self.schema}}
 
-        # How long the last read took, for the trace (extras.intent_milliseconds).
+        # How long the last read took, for the trace (extras.intent_milliseconds), and when its
+        # parts happened on the shim clock: request sent, first reasoning token, first JSON token,
+        # JSON complete. The waterfall splits the LLM start stage with these.
         self.last_milliseconds: float | None = None
+        self.last_times: dict[str, int | None] = {}
 
     def read(self, state: DialogueState, transcript: str, today: str | None = None,
              last_reply: str | None = None) -> list[dict]:
@@ -412,12 +417,32 @@ class IntentReader:
             {"role": "user", "content": context(state, transcript, today, last_reply)},
         ]
         started = time.perf_counter()
+        times: dict[str, int | None] = {"request": now_nanoseconds(), "first_reasoning": None,
+                                        "first_json": None, "done": None}
+        self.last_times = times
+        content = []
 
+        # Streamed, not because anything of it is spoken, but so the reasoning tokens and the JSON
+        # tokens can be timed apart.
         try:
-            answer = self.client.complete_json(messages, self.schema, **self.options)
+            for delta in self.client.stream_chat(messages, response_format=self.response_format, **self.options):
+                if delta.is_reasoning:
+                    times["first_reasoning"] = times["first_reasoning"] or now_nanoseconds()
+                    continue
+
+                times["first_json"] = times["first_json"] or now_nanoseconds()
+                content.append(delta.text)
+
+            times["done"] = now_nanoseconds()
 
         finally:
             self.last_milliseconds = (time.perf_counter() - started) * 1000
+
+        try:
+            answer = json.loads("".join(content))
+
+        except json.JSONDecodeError as error:
+            raise llm_client.LlmError(f"the LLM server returned text that is not JSON: {''.join(content)[:200]!r}") from error
 
         actions = answer.get("actions") if isinstance(answer, dict) else None
 

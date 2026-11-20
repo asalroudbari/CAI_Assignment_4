@@ -76,6 +76,20 @@ def main() -> int:
     assert abs(numbers["stages"]["asr"]["p95_milliseconds"] - 59.0) < 1e-6
     assert abs(numbers["ttfa_p95"] - 687.0) < 1e-6, numbers["ttfa_p95"]
 
+    # The LLM start parts: one turn carries the times inside LLM start (400 ms here), split
+    # 60 + 150 + 40 + 100 + 50; the parts must add up to that turn's LLM start exactly.
+    split = make_record(5, 50, 400, 120, 300)
+    asr_final = split["events"]["asr_final"]
+    for name, after in (("intent_first_reasoning", 60), ("intent_first_json", 210), ("intent_done", 250),
+                        ("first_reasoning_token", 350)):
+        split["extras"][f"{name}_nanoseconds"] = asr_final + after * 1_000_000
+    parts = plot_waterfall.llm_start_parts([split])
+    got = {key: parts[key]["p50_milliseconds"] for key, *_ in plot_waterfall.LLM_START_PARTS}
+    assert got == {"intent_wait": 60.0, "intent_reasoning": 150.0, "intent_json": 40.0,
+                   "act_and_prefill": 100.0, "reply_reasoning": 50.0}, got
+    assert sum(got.values()) == 400.0
+    numbers["llm_start_parts"] = parts
+
     with tempfile.TemporaryDirectory() as directory:
         output = Path(directory) / "waterfall.png"
         plot_waterfall.draw(numbers, output, None)

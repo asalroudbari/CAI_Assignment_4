@@ -19,6 +19,15 @@ How the bars are built:
   * llm_remaining = llm_complete - llm_first_token runs in parallel with synthesis and playback, so
     it is not on the TTFA path. It is drawn as a thin hatched bar starting at llm_first_token, under
     the stacked bar, so the overlap is visible instead of being added to the total.
+  * When the trace carries the times inside the LLM start stage (--llm-nlu llm writes them in
+    extras), LLM start is split into five parts that are back to back and add up to it exactly per
+    turn, drawn as thin rows under it (each row: that part's percentile):
+        intent_wait      = intent first reasoning token - asr_final     (state, request, prefill)
+        intent_reasoning = intent first JSON token - its first reasoning token
+        intent_json      = intent JSON complete - intent first JSON token
+        act_and_prefill  = reply first reasoning token - intent JSON complete
+                                                    (actions run in Python, reply request, prefill)
+        reply_reasoning  = llm_first_token - reply first reasoning token
 
 Needs matplotlib (not part of the agent image; any Python with matplotlib works).
 """
@@ -35,6 +44,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
 from voice_kit import (  # noqa: E402
+    percentile,
     read_trace,
     record_problems,
     summarize_stages,
@@ -49,6 +59,16 @@ TTFA_PATH_STAGES = (
 )
 OFF_PATH_STAGE = ("llm_remaining", "LLM rest (overlaps)", "llm_first_token → llm_complete")
 OFF_PATH_COLOUR = "#898781"
+
+# The parts of the LLM start stage: key, row name, (start, end) time, colour. A time is an event
+# name or an extras key; the parts are back to back from asr_final to llm_first_token.
+LLM_START_PARTS = (
+    ("intent_wait", "↳ intent call: request + prefill", ("asr_final", "intent_first_reasoning_nanoseconds"), "#f6b08e"),
+    ("intent_reasoning", "↳ intent call: reasoning", ("intent_first_reasoning_nanoseconds", "intent_first_json_nanoseconds"), "#d9541a"),
+    ("intent_json", "↳ intent call: JSON", ("intent_first_json_nanoseconds", "intent_done_nanoseconds"), "#f29061"),
+    ("act_and_prefill", "↳ actions run + reply prefill", ("intent_done_nanoseconds", "first_reasoning_token_nanoseconds"), "#f6b08e"),
+    ("reply_reasoning", "↳ reply: reasoning", ("first_reasoning_token_nanoseconds", "llm_first_token"), "#d9541a"),
+)
 TTFA_COLOUR = "#3d3c38"
 TEXT_PRIMARY = "#1f1f1e"
 TEXT_SECONDARY = "#6b6a64"
@@ -87,6 +107,39 @@ def waterfall_numbers(records: list[dict]) -> dict:
         "stages": stages,
         "ttfa_p50": ttfa["p50_milliseconds"],
         "ttfa_p95": ttfa["p95_milliseconds"],
+        "llm_start_parts": llm_start_parts(passing),
+    }
+
+
+def llm_start_parts(records: list[dict]) -> dict | None:
+    """Return the p50 and p95 of each part of the LLM start stage, or None if the trace lacks them.
+
+    Only turns that carry every time are used (a turn whose intent read fell back to the rules has
+    none); ``turn_count`` says how many.
+    """
+    durations: dict[str, list[float]] = {key: [] for key, *_ in LLM_START_PARTS}
+
+    for record in records:
+        times = {**record["events"], **record.get("extras", {})}
+        names = [name for _, _, span, _ in LLM_START_PARTS for name in span]
+
+        if not all(isinstance(times.get(name), int) for name in names):
+            continue
+
+        for key, _, (start, end), _ in LLM_START_PARTS:
+            durations[key].append((times[end] - times[start]) / 1e6)
+
+    count = len(durations[LLM_START_PARTS[0][0]])
+
+    if not count:
+        return None
+
+    return {
+        "turn_count": count,
+        **{
+            key: {"p50_milliseconds": percentile(values, 0.5), "p95_milliseconds": percentile(values, 0.95)}
+            for key, values in durations.items()
+        },
     }
 
 
@@ -98,9 +151,13 @@ def draw(numbers: dict, output: Path, title: str | None) -> None:
     row is the measured TTFA percentile from 0. The LLM's remaining generation is hatched and
     starts at llm_first_token, so its overlap with speech start is visible.
     """
+    parts = numbers.get("llm_start_parts")
+    part_rows = [(name, "") for _, name, _, _ in LLM_START_PARTS] if parts else []
     rows = [(name, span) for _, name, span, _ in TTFA_PATH_STAGES]
+    rows[2:2] = part_rows  # the parts sit right under the LLM start row
     rows.append((OFF_PATH_STAGE[1], OFF_PATH_STAGE[2]))
     rows.append(("TTFA (measured)", "end_of_user_speech → tts_first_audio"))
+    path_rows = [0, 1, 2 + len(part_rows)]  # rows of ASR, LLM start, speech start
 
     panels = (("p50", "p50_milliseconds", numbers["ttfa_p50"]),
               ("p95", "p95_milliseconds", numbers["ttfa_p95"]))
@@ -112,22 +169,37 @@ def draw(numbers: dict, output: Path, title: str | None) -> None:
         longest = max(longest, steps, measured, start_remaining + numbers["stages"]["llm_remaining"][key])
     x_max = max(longest * 1.15, 300.0)
 
-    figure, all_axes = plt.subplots(2, 1, figsize=(8.5, 6.4), dpi=200, sharex=True)
+    figure, all_axes = plt.subplots(2, 1, figsize=(8.5, 6.4 + 1.6 * bool(part_rows)), dpi=200, sharex=True)
     bar_height = 0.62
 
     for axes, (panel_name, key, measured) in zip(all_axes, panels):
         left = 0.0
-        for row, (stage, _, _, colour) in enumerate(TTFA_PATH_STAGES):
+        previous_row = None
+        for row, (stage, _, _, colour) in zip(path_rows, TTFA_PATH_STAGES):
             width = numbers["stages"][stage][key]
             axes.barh(row, width, left=left, height=bar_height, color=colour)
             axes.text(left + width + 6, row, f"{width:.1f} ms", ha="left", va="center",
                       color=TEXT_PRIMARY, fontsize=9, fontweight="bold")
-            if row:
-                axes.plot([left, left], [row - 1 + bar_height / 2, row - bar_height / 2],
+            if previous_row is not None:
+                axes.plot([left, left], [previous_row + bar_height / 2, row - bar_height / 2],
                           color=TEXT_SECONDARY, linewidth=0.8, linestyle=":")
+
+            if stage == "llm_start" and parts:
+                # Each part's own percentile, stepped from where LLM start begins. Percentiles do not
+                # add, so the steps need not end exactly where the LLM start bar ends.
+                part_left = left
+                for offset, (part, _, _, part_colour) in enumerate(LLM_START_PARTS, start=1):
+                    part_width = parts[part][key]
+                    axes.barh(row + offset, part_width, left=part_left, height=bar_height * 0.55,
+                              color=part_colour)
+                    axes.text(part_left + part_width + 6, row + offset, f"{part_width:.1f} ms",
+                              ha="left", va="center", color=TEXT_SECONDARY, fontsize=8)
+                    part_left += part_width
+
+            previous_row = row
             left += width
 
-        remaining_row = len(TTFA_PATH_STAGES)
+        remaining_row = path_rows[-1] + 1
         remaining_start = numbers["stages"]["asr"][key] + numbers["stages"]["llm_start"][key]
         remaining = numbers["stages"]["llm_remaining"][key]
         axes.barh(remaining_row, remaining, left=remaining_start, height=bar_height * 0.7,
@@ -143,8 +215,12 @@ def draw(numbers: dict, output: Path, title: str | None) -> None:
 
         axes.set_yticks(range(len(rows)))
         axes.set_yticklabels([f"{name}\n{span}" for name, span in rows], fontsize=8.5)
-        for label in axes.get_yticklabels()[:len(TTFA_PATH_STAGES)]:
-            label.set_color(TEXT_PRIMARY)
+        for index, label in enumerate(axes.get_yticklabels()):
+            if index in path_rows:
+                label.set_color(TEXT_PRIMARY)
+            elif 1 < index < path_rows[-1]:
+                label.set_color(TEXT_SECONDARY)
+                label.set_fontsize(8)
         axes.invert_yaxis()
         axes.set_xlim(0, x_max)
         axes.grid(axis="x", color=GRID, linewidth=0.8)
@@ -182,6 +258,13 @@ def main(argv: list[str] | None = None) -> int:
     print(f"TTFA p50 {numbers['ttfa_p50']:.1f} ms   p95 {numbers['ttfa_p95']:.1f} ms")
     for stage, percentiles in numbers["stages"].items():
         print(f"  {stage:<14} p50 {percentiles['p50_milliseconds']:8.1f}   p95 {percentiles['p95_milliseconds']:8.1f}")
+
+    parts = numbers.get("llm_start_parts")
+
+    if parts:
+        print(f"  llm_start split ({parts['turn_count']} turns with every time):")
+        for part, *_ in LLM_START_PARTS:
+            print(f"    {part:<18} p50 {parts[part]['p50_milliseconds']:8.1f}   p95 {parts[part]['p95_milliseconds']:8.1f}")
 
     draw(numbers, arguments.output, arguments.title)
     print(f"figure written to {arguments.output}")
